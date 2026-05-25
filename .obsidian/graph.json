@@ -1,0 +1,59 @@
+{
+  "_comment": "이 파일을 .obsidian/graph.json으로 복사하면 그래프 뷰에서 90_Engine 폴더가 자동 제외됩니다.",
+  "collapse-filter": false,
+  "search": "-path:90_Engine/ -path:00_System/",
+  "showTags": true,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    {
+      "query": "path:00_System/",
+      "color": {
+        "a": 1,
+        "rgb": 14377049
+      }
+    },
+    {
+      "query": "path:10_MOC/",
+      "color": {
+        "a": 1,
+        "rgb": 5431540
+      }
+    },
+    {
+      "query": "path:20_Concepts/ tag:#AI/Philosophy",
+      "color": {
+        "a": 1,
+        "rgb": 14728670
+      }
+    },
+    {
+      "query": "path:20_Concepts/ tag:#AI/Architecture",
+      "color": {
+        "a": 1,
+        "rgb": 5028030
+      }
+    },
+    {
+      "query": "path:20_Concepts/ tag:#AI/Implementation",
+      "color": {
+        "a": 1,
+        "rgb": 13743002
+      }
+    }
+  ],
+  "collapse-display": false,
+  "showArrow": true,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1.2,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": false,
+  "centerStrength": 0.5,
+  "repelStrength": 12,
+  "linkStrength": 1,
+  "linkDistance": 250,
+  "scale": 1,
+  "close": true
+}

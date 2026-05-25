@@ -1,0 +1,471 @@
+#!/usr/bin/env python3
+"""
+90_Engine/indexer.py
+Karpathy LLM Framework - Vault Indexer v1.1
+
+마크다운 Vault를 DuckDB 그래프 캐시로 컴파일 + Ollama 임베딩 캐싱.
+Ontology Specification v1.0을 강제합니다.
+
+사용:
+    # 기본 (엣지만 인덱싱, 임베딩 없음)
+    python3 indexer.py --report
+
+    # 임베딩까지 풀 컴파일 (Ollama 가동 중일 때)
+    python3 indexer.py --embed --report
+
+    # 강제 재인덱싱 + 재임베딩
+    python3 indexer.py --force --embed --report
+"""
+
+import os
+import re
+import sys
+import json
+import hashlib
+import uuid
+import argparse
+import urllib.request
+import urllib.error
+from datetime import datetime
+from pathlib import Path
+
+try:
+    import duckdb
+except ImportError:
+    sys.exit("ERROR: duckdb 미설치. pip install duckdb --break-system-packages")
+
+
+# ─────────────────────────────────────────────────────────────
+# §1. 헌법 상수
+# ─────────────────────────────────────────────────────────────
+ALLOWED_PREDICATES = (
+    "abstracts", "causes", "contradicts", "defines", "extends",
+    "implemented_by", "replaces", "requires", "utilizes",
+)
+
+EDGE_REGEX = re.compile(
+    r"^-\s+"
+    r"`\[\[(?P<source>.+?)\]\]"
+    r"\s+(?P<predicate>\w+)\s+"
+    r"\[\[(?P<target>.+?)\]\]`"
+    r"(?:\s*—\s*(?P<desc>.*))?$"
+)
+
+FRONTMATTER_REGEX = re.compile(
+    r"\A---\s*\n(?P<meta>.*?)\n---\s*\n",
+    re.DOTALL
+)
+
+DEFAULT_OLLAMA_URL = "http://localhost:11434"
+DEFAULT_EMBED_MODEL = "bge-m3"
+
+
+# ─────────────────────────────────────────────────────────────
+# §2. Ollama 임베딩 클라이언트 (urllib 표준 라이브러리만 사용)
+# ─────────────────────────────────────────────────────────────
+def ollama_embed(text, model=DEFAULT_EMBED_MODEL, base_url=DEFAULT_OLLAMA_URL, timeout=30):
+    """Ollama /api/embed 엔드포인트 호출. 실패 시 None 반환."""
+    url = f"{base_url}/api/embed"
+    payload = json.dumps({"model": model, "input": text}).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        # Ollama 응답: {"embeddings": [[...]]}
+        embeddings = data.get("embeddings") or data.get("embedding")
+        if isinstance(embeddings, list) and embeddings:
+            if isinstance(embeddings[0], list):
+                return embeddings[0]  # /api/embed (배치 응답)
+            return embeddings  # /api/embeddings (단일 응답)
+        return None
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError) as e:
+        return None
+
+
+def normalize_vector(vec):
+    """L2 정규화 — DuckDB array_cosine_similarity는 정규화된 벡터에서 dot product와 동치."""
+    if not vec:
+        return vec
+    norm = sum(x * x for x in vec) ** 0.5
+    if norm == 0:
+        return vec
+    return [x / norm for x in vec]
+
+
+# ─────────────────────────────────────────────────────────────
+# §3. 데이터베이스 초기화
+# ─────────────────────────────────────────────────────────────
+def init_database(db_path):
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = duckdb.connect(str(db_path))
+    preds_sql = ", ".join(f"'{p}'" for p in ALLOWED_PREDICATES)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS nodes (
+            node_id        UUID PRIMARY KEY,
+            file_path      VARCHAR NOT NULL UNIQUE,
+            title          VARCHAR NOT NULL,
+            aliases        VARCHAR[],
+            type           VARCHAR,
+            moc            VARCHAR,
+            md5_hash       VARCHAR NOT NULL,
+            embedding      FLOAT[],
+            embedding_model VARCHAR,
+            embedding_hash VARCHAR,
+            last_indexed   TIMESTAMP,
+            updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS edges (
+            edge_id      UUID PRIMARY KEY,
+            source_id    UUID REFERENCES nodes(node_id),
+            target_id    UUID REFERENCES nodes(node_id),
+            predicate    VARCHAR NOT NULL CHECK (
+                predicate IN ({preds_sql})
+            ),
+            weight       FLOAT DEFAULT 1.0,
+            evidence     VARCHAR,
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CHECK (source_id != target_id)
+        )
+    """)
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_predicate ON edges(predicate)")
+
+    return conn
+
+
+# ─────────────────────────────────────────────────────────────
+# §4. 파싱 유틸리티
+# ─────────────────────────────────────────────────────────────
+def calculate_md5(content):
+    return hashlib.md5(content.encode("utf-8")).hexdigest()
+
+
+def parse_yaml_frontmatter(content):
+    match = FRONTMATTER_REGEX.search(content)
+    if not match:
+        return {}
+    metadata = {}
+    current_key = None
+    for raw_line in match.group("meta").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" in line and not line.startswith("-"):
+            key, _, val = line.partition(":")
+            current_key = key.strip()
+            val = val.strip()
+            if val.startswith("[") and val.endswith("]"):
+                metadata[current_key] = [
+                    v.strip().strip('"').strip("'")
+                    for v in val[1:-1].split(",") if v.strip()
+                ]
+            elif val in ("null", "~", ""):
+                metadata[current_key] = None
+            else:
+                metadata[current_key] = val.strip('"').strip("'")
+        elif line.startswith("-") and current_key:
+            val = line.lstrip("-").strip().strip('"').strip("'")
+            if not isinstance(metadata.get(current_key), list):
+                metadata[current_key] = []
+            metadata[current_key].append(val)
+    return metadata
+
+
+def extract_edges_safely(content):
+    edges = []
+    in_code_block = False
+    for raw_line in content.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        match = EDGE_REGEX.match(stripped)
+        if match:
+            edges.append(match.groupdict())
+    return edges
+
+
+def normalize_link_target(target):
+    return target.split("|", 1)[0].strip()
+
+
+def strip_frontmatter_for_embedding(content):
+    """임베딩용 텍스트: frontmatter 제거 + 코드 펜스 그대로 유지."""
+    if content.startswith("---"):
+        end = content.find("\n---", 3)
+        if end != -1:
+            return content[end + 4:].strip()
+    return content
+
+
+# ─────────────────────────────────────────────────────────────
+# §5. 인덱싱 파이프라인
+# ─────────────────────────────────────────────────────────────
+def collect_markdown_files(vault_root, exclude=("90_Engine", ".git", ".obsidian")):
+    files = []
+    for path in vault_root.rglob("*.md"):
+        if any(part in exclude for part in path.parts):
+            continue
+        files.append(path)
+    return sorted(files)
+
+
+def get_existing_node(conn, file_path):
+    row = conn.execute(
+        "SELECT node_id, md5_hash, embedding_model FROM nodes WHERE file_path = ?",
+        [file_path]
+    ).fetchone()
+    if row is None:
+        return None, None, None
+    raw_id, stored_hash, stored_model = row
+    node_uuid = raw_id if isinstance(raw_id, uuid.UUID) else uuid.UUID(str(raw_id))
+    return node_uuid, stored_hash, stored_model
+
+
+def index_vault(vault_root, db_path, force_rebuild=False, embed=False,
+                ollama_url=DEFAULT_OLLAMA_URL, embed_model=DEFAULT_EMBED_MODEL):
+    conn = init_database(db_path)
+    print(f"[*] LTM Cache Engine v1.1 → {db_path}")
+    print(f"[*] Vault root: {vault_root.resolve()}")
+    if force_rebuild:
+        print(f"[*] --force 모드: 모든 파일의 엣지를 강제 재구성")
+    if embed:
+        print(f"[*] --embed 모드: Ollama {embed_model} @ {ollama_url}")
+
+    md_files = collect_markdown_files(vault_root)
+    print(f"[*] 발견된 마크다운 파일: {len(md_files)}개")
+
+    path_to_id = {}
+    title_to_id = {}
+    modified_paths = set()
+    needs_embedding = set()
+    stats = {
+        "nodes_total": len(md_files),
+        "nodes_new": 0,
+        "nodes_updated": 0,
+        "nodes_unchanged": 0,
+        "embeddings_built": 0,
+        "embeddings_skipped": 0,
+        "embeddings_failed": 0,
+        "edges_extracted": 0,
+        "edges_inserted": 0,
+        "edges_rejected": 0,
+        "edges_dangling": 0,
+    }
+
+    # ── 1차 패스: 노드 업서트 + 임베딩 필요 판정 ──
+    for path in md_files:
+        content = path.read_text(encoding="utf-8")
+        filename_title = path.stem
+        current_hash = calculate_md5(content)
+        metadata = parse_yaml_frontmatter(content)
+
+        existing_uuid, existing_hash, existing_model = get_existing_node(conn, str(path))
+
+        if existing_uuid is None:
+            node_uuid = uuid.uuid4()
+            modified_paths.add(path)
+            stats["nodes_new"] += 1
+            conn.execute("""
+                INSERT INTO nodes (node_id, file_path, title, aliases, type, moc, md5_hash, last_indexed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                node_uuid, str(path),
+                metadata.get("title", filename_title),
+                metadata.get("aliases") or [],
+                metadata.get("type"),
+                metadata.get("moc"),
+                current_hash,
+                datetime.now(),
+            ])
+            if embed:
+                needs_embedding.add((node_uuid, path, content))
+        elif existing_hash != current_hash:
+            node_uuid = existing_uuid
+            modified_paths.add(path)
+            stats["nodes_updated"] += 1
+            conn.execute("""
+                UPDATE nodes SET title = ?, aliases = ?, type = ?, moc = ?,
+                    md5_hash = ?, last_indexed = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE node_id = ?
+            """, [
+                metadata.get("title", filename_title),
+                metadata.get("aliases") or [],
+                metadata.get("type"),
+                metadata.get("moc"),
+                current_hash,
+                datetime.now(),
+                node_uuid,
+            ])
+            if embed:
+                needs_embedding.add((node_uuid, path, content))
+        else:
+            node_uuid = existing_uuid
+            stats["nodes_unchanged"] += 1
+            if force_rebuild:
+                modified_paths.add(path)
+            # 임베딩 모델이 바뀌었거나 임베딩이 없는 경우에만 재임베딩
+            if embed and existing_model != embed_model:
+                needs_embedding.add((node_uuid, path, content))
+            elif embed and force_rebuild:
+                needs_embedding.add((node_uuid, path, content))
+
+        path_to_id[path] = node_uuid
+        title_to_id[filename_title] = node_uuid
+        for alias in (metadata.get("aliases") or []):
+            title_to_id.setdefault(alias, node_uuid)
+
+    print(f"[*] 노드 패스 완료 — 신규: {stats['nodes_new']}, 수정: {stats['nodes_updated']}, 무변경: {stats['nodes_unchanged']}")
+
+    # ── 1.5차 패스: 임베딩 빌드 ──
+    if embed and needs_embedding:
+        print(f"[*] 임베딩 빌드 시작: {len(needs_embedding)}개 노드")
+        for i, (node_uuid, path, content) in enumerate(sorted(needs_embedding, key=lambda x: str(x[1])), 1):
+            text_for_embed = strip_frontmatter_for_embedding(content)
+            vec = ollama_embed(text_for_embed, model=embed_model, base_url=ollama_url)
+            if vec is None:
+                stats["embeddings_failed"] += 1
+                if stats["embeddings_failed"] <= 2:
+                    print(f"  [WARN] {path.name}: Ollama 응답 실패 (BM25-only로 fallback 예정)")
+                continue
+            normalized = normalize_vector(vec)
+            emb_hash = hashlib.md5(json.dumps(normalized[:8]).encode()).hexdigest()
+            conn.execute("""
+                UPDATE nodes
+                SET embedding = ?, embedding_model = ?, embedding_hash = ?
+                WHERE node_id = ?
+            """, [normalized, embed_model, emb_hash, node_uuid])
+            stats["embeddings_built"] += 1
+            if i % 5 == 0 or i == len(needs_embedding):
+                print(f"  [*] 진행: {i}/{len(needs_embedding)}")
+
+        print(f"[*] 임베딩 패스 완료 — 빌드: {stats['embeddings_built']}, 실패: {stats['embeddings_failed']}")
+
+    # ── 2차 패스: 엣지 재구성 ──
+    for path in modified_paths:
+        file_source_uuid = path_to_id[path]
+        conn.execute("DELETE FROM edges WHERE source_id = ?", [file_source_uuid])
+        content = path.read_text(encoding="utf-8")
+        raw_edges = extract_edges_safely(content)
+        stats["edges_extracted"] += len(raw_edges)
+
+        for edge in raw_edges:
+            predicate = edge["predicate"]
+            target_title = normalize_link_target(edge["target"])
+            source_title = normalize_link_target(edge["source"])
+
+            if predicate not in ALLOWED_PREDICATES:
+                print(f"  [REJECT] {path.name}: 화이트리스트 외 술어 '{predicate}'")
+                stats["edges_rejected"] += 1
+                continue
+
+            source_uuid = title_to_id.get(source_title)
+            target_uuid = title_to_id.get(target_title)
+
+            if source_uuid is None or target_uuid is None:
+                stats["edges_dangling"] += 1
+                continue
+
+            if source_uuid == target_uuid:
+                print(f"  [REJECT] {path.name}: 자기참조")
+                stats["edges_rejected"] += 1
+                continue
+
+            try:
+                conn.execute("""
+                    INSERT INTO edges (edge_id, source_id, target_id, predicate, evidence)
+                    VALUES (?, ?, ?, ?, ?)
+                """, [
+                    uuid.uuid4(), source_uuid, target_uuid, predicate, edge.get("desc"),
+                ])
+                stats["edges_inserted"] += 1
+            except Exception as e:
+                print(f"  [ERROR] {path.name}: {e}")
+                stats["edges_rejected"] += 1
+
+    conn.commit()
+    return stats, conn
+
+
+# ─────────────────────────────────────────────────────────────
+# §6. 리포트
+# ─────────────────────────────────────────────────────────────
+def print_report(conn, stats):
+    print()
+    print("=" * 64)
+    print("  Karpathy LLM Framework - Vault 인덱싱 리포트 v1.1")
+    print("=" * 64)
+    print(f"\n[노드] 총 {stats['nodes_total']} | 신규 {stats['nodes_new']} | 수정 {stats['nodes_updated']} | 무변경 {stats['nodes_unchanged']}")
+    print(f"[엣지] 추출 {stats['edges_extracted']} | 적재 {stats['edges_inserted']} | 거부 {stats['edges_rejected']} | Dangling {stats['edges_dangling']}")
+    print(f"[임베딩] 빌드 {stats['embeddings_built']} | 실패 {stats['embeddings_failed']}")
+
+    print(f"\n[술어 분포]")
+    rows = conn.execute("""
+        SELECT predicate, COUNT(*) AS cnt FROM edges
+        GROUP BY predicate ORDER BY cnt DESC
+    """).fetchall()
+    for pred, cnt in rows:
+        print(f"  {pred:18s} {cnt:3d}  {'█' * cnt}")
+
+    cov = conn.execute("""
+        SELECT COUNT(*) AS total, COUNT(embedding) AS with_emb,
+               COUNT(DISTINCT embedding_model) AS model_cnt
+        FROM nodes
+    """).fetchone()
+    print(f"\n[임베딩 커버리지] {cov[1]}/{cov[0]} 노드 ({100*cov[1]//max(cov[0],1)}%)")
+
+    print(f"\n[Hub Top 5]")
+    rows = conn.execute("""
+        SELECT n.title, COUNT(e.edge_id) AS deg FROM nodes n
+        LEFT JOIN edges e ON e.target_id = n.node_id
+        GROUP BY n.title ORDER BY deg DESC, n.title LIMIT 5
+    """).fetchall()
+    for title, deg in rows:
+        print(f"  {title:40s} ← {deg}")
+
+    print()
+    print("=" * 64)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Karpathy LLM Framework Vault Indexer v1.1")
+    parser.add_argument("--vault", default=".", help="Vault 루트 경로")
+    parser.add_argument("--db", default="90_Engine/ltm_cache.db", help="DuckDB 캐시 경로")
+    parser.add_argument("--report", action="store_true", help="리포트 출력")
+    parser.add_argument("--force", action="store_true", help="MD5 무관 모든 파일 엣지 재구성")
+    parser.add_argument("--embed", action="store_true", help="Ollama 임베딩 빌드/캐시")
+    parser.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL, help="Ollama 베이스 URL")
+    parser.add_argument("--ollama-model", default=DEFAULT_EMBED_MODEL, help="임베딩 모델명")
+    args = parser.parse_args()
+
+    vault_root = Path(args.vault).resolve()
+    db_path = Path(args.db)
+    if not db_path.is_absolute():
+        db_path = vault_root / args.db
+
+    stats, conn = index_vault(
+        vault_root, db_path,
+        force_rebuild=args.force,
+        embed=args.embed,
+        ollama_url=args.ollama_url,
+        embed_model=args.ollama_model,
+    )
+    if args.report:
+        print_report(conn, stats)
+    conn.close()
+    print("[+] 인덱싱 파이프라인 완료.")
+
+
+if __name__ == "__main__":
+    main()

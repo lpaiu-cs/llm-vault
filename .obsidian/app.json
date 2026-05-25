@@ -1,0 +1,24 @@
+{
+  "_comment": "이 파일을 .obsidian/app.json으로 복사하면 권장 설정이 적용됩니다.",
+  "newFileLocation": "folder",
+  "newFileFolderPath": "20_Concepts",
+  "attachmentFolderPath": "99_Attachments",
+  "userIgnoreFilters": [
+    "90_Engine/",
+    "*.db",
+    "*.db.wal",
+    "__pycache__/",
+    "*.py",
+    ".gitignore",
+    "LICENSE",
+    "requirements.txt"
+  ],
+  "alwaysUpdateLinks": true,
+  "showLineNumber": false,
+  "defaultViewMode": "source",
+  "promptDelete": true,
+  "showFrontmatter": true,
+  "useMarkdownLinks": false,
+  "newLinkFormat": "shortest",
+  "trashOption": "system"
+}
