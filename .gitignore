@@ -1,0 +1,94 @@
+# ─────────────────────────────────────────────────────────
+# DuckDB 캐시 (자동 재생성 가능, 개인 임베딩 데이터 포함)
+# ─────────────────────────────────────────────────────────
+90_Engine/*.db
+90_Engine/*.db.wal
+*.duckdb
+*.duckdb.wal
+ltm_cache.db*
+
+# ─────────────────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# ─────────────────────────────────────────────────────────
+# Obsidian (사용자별 workspace 상태)
+# ─────────────────────────────────────────────────────────
+.obsidian/workspace
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.obsidian/graph.json
+.trash/
+.obsidian/plugins/*/data.json
+
+# 다만 .obsidian/app.json 같은 권장 설정은 커밋 (아래 negation 패턴)
+!.obsidian/app.json
+!.obsidian/appearance.json
+!.obsidian/core-plugins.json
+!.obsidian/graph.json
+
+# ─────────────────────────────────────────────────────────
+# 시뮬레이션/테스트 산출물
+# ─────────────────────────────────────────────────────────
+Test Violation Note.md
+*_test.md
+/tmp/
+
+# ─────────────────────────────────────────────────────────
+# IDE
+# ─────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.cursorignore
+
+# ─────────────────────────────────────────────────────────
+# OS metadata
+# ─────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# ─────────────────────────────────────────────────────────
+# MCP 클라이언트 로컬 설정 (절대 경로 포함되므로 커밋 금지)
+# ─────────────────────────────────────────────────────────
+mcp_config_local.json
+claude_desktop_config.local.json
+.cursor/
+
+# ─────────────────────────────────────────────────────────
+# 로컬 임시 작업
+# ─────────────────────────────────────────────────────────
+scratch/
+notes_draft/
+*.bak
