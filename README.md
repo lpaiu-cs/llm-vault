@@ -9,12 +9,12 @@
 
 `llm-vault`는 두 가지를 함께 제공합니다.
 
-1. **Obsidian Vault**: Markdown 노트를 지식 그래프로 관리하는 개인 지식 베이스
+1. **Obsidian Vault**: Markdown node를 지식 그래프로 관리하는 개인 지식 베이스
 2. **AI memory runtime**: Antigravity, Cursor, Claude Desktop 같은 MCP 클라이언트가 vault를 검색하고 관리할 수 있게 하는 Python MCP 서버
 
-기본 노트는 Karpathy의 LLM 멘탈 모델을 예시 코퍼스로 제공합니다. 그대로 읽어도 되고, private repo로 복제해 자기만의 연구 메모리로 확장해도 됩니다.
+기본 node는 Karpathy의 LLM 멘탈 모델을 예시 코퍼스로 제공합니다. 그대로 읽어도 되고, private repo로 복제해 자기만의 연구 메모리로 확장해도 됩니다.
 
-에이전트가 질문을 받으면 vault에서 관련 노트를 검색해 컨텍스트로 사용할 수 있습니다. v2.2 MCP 서버는 검색뿐 아니라 노트 생성, 수정, 엣지 관리, 그래프 정합까지 지원합니다.
+에이전트가 질문을 받으면 vault에서 관련 node를 검색해 컨텍스트로 사용할 수 있습니다. v2.2 MCP 서버는 검색뿐 아니라 node 생성, 수정, edge 관리, 그래프 정합까지 지원합니다.
 
 ## 시작하기
 
@@ -61,13 +61,13 @@ llm-vault/
 
 ## 일상 워크플로우
 
-노트는 사람이 직접 Markdown으로 작성해도 되고, MCP write 도구로 만들 수도 있습니다.
+node는 사람이 직접 Markdown으로 작성해도 되고, MCP write 도구로 만들 수도 있습니다.
 
 - 사람이 편집한 뒤에는 `sync_vault()` 또는 인덱서 실행으로 캐시를 갱신합니다.
 - 에이전트가 메모리를 저장할 때는 `list_notes()`로 기존 제목을 확인한 뒤 `create_note()`, `update_note()`, `upsert_edge()`를 사용합니다.
 - dangling edge가 생기면 자동 정합이 처리하거나 `reconcile_graph()`로 즉시 정리합니다.
 
-노트 작성 시 edge predicate는 아래 9개만 허용됩니다.
+node 작성 시 edge predicate는 아래 9개만 허용됩니다.
 
 `requires` · `utilizes` · `implemented_by` · `extends` · `abstracts` · `causes` · `contradicts` · `replaces` · `defines`
 

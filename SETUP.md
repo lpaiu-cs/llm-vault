@@ -25,7 +25,7 @@ Antigravity / Cursor / Claude Desktop
               ├─ Markdown parsing
               ├─ 9-predicate validation
               ├─ UUID / metadata preservation
-              └─ Ollama note embedding cache
+              └─ Ollama node embedding cache
 
 90_Engine/ltm_cache.db
         ├─ nodes
@@ -83,7 +83,7 @@ python3 90_Engine/indexer.py --force --embed --report
 
 Windows에서 `python3`가 없다면 같은 명령을 `python.exe`로 실행하세요.
 
-이후 일반적인 노트 수정 후에는 증분 인덱싱이면 충분합니다.
+이후 일반적인 node 수정 후에는 증분 인덱싱이면 충분합니다.
 
 ```bash
 python3 90_Engine/indexer.py --embed --report
@@ -134,11 +134,11 @@ llm-vault의 vault_stats를 호출해서 현재 그래프 상태를 알려줘.
 llm-vault에서 "Vibe Coding의 위험"을 retrieve_knowledge로 검색해줘.
 ```
 
-정상 연결되면 노드/엣지 수나 검색 캡슐이 응답에 포함됩니다.
+정상 연결되면 node/엣지 수나 검색 캡슐이 응답에 포함됩니다.
 
 ## 6. 운영 규칙
 
-노트 edge predicate는 9개만 허용됩니다.
+node edge predicate는 9개만 허용됩니다.
 
 | Predicate | 판단 기준 |
 |-----------|-----------|
@@ -189,7 +189,7 @@ ollama pull bge-m3
 
 ### Dangling edge가 남음
 
-대상 노트가 아직 없거나, 새 노트 생성 후 전체 edge 재구성이 아직 실행되지 않은 상태입니다.
+대상 node가 아직 없거나, 새 node 생성 후 전체 edge 재구성이 아직 실행되지 않은 상태입니다.
 
 ```bash
 python3 90_Engine/indexer.py --force --embed --report
