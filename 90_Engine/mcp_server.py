@@ -7,20 +7,20 @@ Karpathy LLM Framework - MCP Server (stdio transport) v2.2  [AI-managed LTM, inc
 AI가 그래프를 직접 관리할 수 있는 write 도구를 추가한 버전.
 
 추가된 write 도구:
-  - create_note(...)   : 새 메모리(노드) 생성 + 엣지 + 자동 임베딩
-  - update_note(...)   : 기존 노트 본문/엣지 수정 (정체성 node_id 보존)
-  - upsert_edge(...)   : 기존 노트에 엣지 1개 추가
-  - remove_edge(...)   : 기존 노트에서 엣지 1개 제거
-  - delete_node(...)   : 노트 파일 + DB 노드/엣지 안전 삭제
+  - create_note(...)   : 새 메모리 node 생성 + 엣지 + 자동 임베딩
+  - update_note(...)   : 기존 node 본문/엣지 수정 (정체성 node_id 보존)
+  - upsert_edge(...)   : 기존 node에 엣지 1개 추가
+  - remove_edge(...)   : 기존 node에서 엣지 1개 제거
+  - delete_node(...)   : node 파일 + DB node/엣지 안전 삭제
   - reconcile_graph()  : 전체 엣지 재구성으로 dangling 일괄 해소(주기 실행 권장)
-  - list_notes()       : 전체 노트 목록(링크 타깃 선택용)
+  - list_notes()       : 전체 node 목록(링크 타깃 선택용)
 
 설계 원칙 (원본 아키텍처 준수):
   * 메모리는 마크다운 파일로 작성되고, indexer가 단일 게이트키퍼로
     9술어 CHECK 제약 검증 + UUID 발급 + Ollama 임베딩을 담당한다.
   * 따라서 write 도구는 "규격에 맞는 마크다운을 쓰고 → 재인덱싱을 트리거"한다.
     임베딩을 모델이 직접 만지지 않는다(=indexer가 자동 갱신).
-  * [v2.1] write 도구는 기본 '증분 인덱싱'(빠름)만 한다. 새 노트가 기존 노트로부터
+  * [v2.1] write 도구는 기본 '증분 인덱싱'(빠름)만 한다. 새 node가 기존 node로부터
     받는 링크는 즉시 연결되지 않으므로, reconcile_graph()(또는 sync_vault(force=True))를
     주기적으로 실행해 그래프를 정합 상태로 맞춘다. 대규모 vault에서도 재임베딩이
     없어 비용이 낮다.
@@ -28,7 +28,7 @@ AI가 그래프를 직접 관리할 수 있는 write 도구를 추가한 버전.
     정합 후 debounce(기본 600초)가 지났고 pending이 있으면 1회 force 정합을 수행한다.
     상태는 DB 옆 '<VAULT_DB>.reconcile.json'에 저장되어 세션(프로세스)이 바뀌어도
     유지된다. 끄려면 env VAULT_AUTO_RECONCILE=0, 창 조절은 VAULT_RECONCILE_DEBOUNCE_SEC.
-  * 링크/엣지 타깃은 반드시 대상 노트의 '제목(=파일명 stem)'과 정확히 일치해야 한다.
+  * 링크/엣지 타깃은 반드시 대상 node의 '제목(=파일명 stem)'과 정확히 일치해야 한다.
   * predicate는 9개 화이트리스트만 허용. 그 외는 거부된다.
 
 Cursor / Claude Desktop / Antigravity 설정 (~/.cursor/mcp.json 등):
@@ -193,7 +193,7 @@ def _validate_title(title: str) -> str:
 
 
 def _find_note_path(title: str) -> Optional[Path]:
-    """제목(=파일명 stem)으로 노트 파일을 찾는다. 엔진/숨김 폴더는 제외."""
+    """제목(=파일명 stem)으로 node 파일을 찾는다. 엔진/숨김 폴더는 제외."""
     root = _vault_root()
     for p in root.rglob(f"{title}.md"):
         if any(part in EXCLUDE_PARTS for part in p.parts):
@@ -229,7 +229,7 @@ def _dangling_warnings(edges) -> list:
     for (pred, tgt, _desc) in edges:
         if _find_note_path(tgt) is None:
             w.append(
-                f"target '{tgt}' 노트가 아직 없어 dangling 상태입니다. "
+                f"target '{tgt}' node가 아직 없어 dangling 상태입니다. "
                 f"create_note로 만들면 다음 sync에서 자동 연결됩니다."
             )
     return w
@@ -244,12 +244,12 @@ def _edge_line(src: str, pred: str, tgt: str, desc: Optional[str] = None) -> str
 
 def _build_note_markdown(title, body, type_, moc, aliases, tags, edges, sources,
                          node_id=None, id_=None, created=None, version="1.0") -> str:
-    """indexer가 파싱 가능한 frontmatter + 9술어 엣지 섹션을 갖춘 노트 생성.
+    """indexer가 파싱 가능한 frontmatter + 9술어 엣지 섹션을 갖춘 node 생성.
 
     edges: [(pred, target, desc)] (source는 title로 고정)
     """
     nid = node_id or str(uuid.uuid4())
-    slug = re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_") or "note"
+    slug = re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_") or "node"
     idv = id_ or f"concept_{slug}"
     created = created or datetime.now().strftime("%Y-%m-%d")
     al = "[" + ", ".join(aliases) + "]" if aliases else "[]"
@@ -334,7 +334,7 @@ def retrieve_knowledge(query: str, top_k: int = 5, max_hops: int = 2,
         query: 자연어 질문 (한국어/영어 혼합 가능)
         top_k: 1차 검색 seed nodes 수 (기본 5)
         max_hops: 그래프 확장 최대 hop (기본 2)
-        max_nodes: 출력 캡슐 최대 노드 수 (기본 10)
+        max_nodes: 출력 캡슐 최대 node 수 (기본 10)
 
     참고: 호출 시 debounce 조건이 맞으면 그동안의 변경을 자동으로 1회 정합한다.
     """
@@ -345,10 +345,10 @@ def retrieve_knowledge(query: str, top_k: int = 5, max_hops: int = 2,
 
 @mcp.tool()
 def sync_vault(force: bool = False, embed: bool = True) -> dict:
-    """Vault 디렉터리를 스캔하여 신규/수정된 마크다운 노트를 DuckDB로 증분 컴파일.
+    """Vault 디렉터리를 스캔하여 신규/수정된 Markdown node를 DuckDB로 증분 컴파일.
 
-    MD5로 변경을 감지해 무변경 파일은 건너뜁니다. embed=True면 변경 노트만 Ollama로
-    재임베딩합니다. dangling edge(타깃 노트가 뒤늦게 생긴 경우 등)를 모두 다시
+    MD5로 변경을 감지해 무변경 파일은 건너뜁니다. embed=True면 변경 node만 Ollama로
+    재임베딩합니다. dangling edge(타깃 node가 뒤늦게 생긴 경우 등)를 모두 다시
     풀고 싶으면 force=True로 호출하세요(엣지 전체 재구성).
 
     Args:
@@ -363,7 +363,7 @@ def sync_vault(force: bool = False, embed: bool = True) -> dict:
 
 @mcp.tool()
 def vault_stats() -> dict:
-    """현재 Vault 그래프 통계: 노드/엣지 수, 임베딩 커버리지, 술어 분포,
+    """현재 Vault 그래프 통계: node/엣지 수, 임베딩 커버리지, 술어 분포,
     Hub Top 5(in-degree), Authority Top 5(out-degree)."""
     r = get_retriever()
     conn = r.conn
@@ -396,8 +396,8 @@ def vault_stats() -> dict:
 # ===== 쓰기 도구 (신규) ====================================================
 @mcp.tool()
 def list_notes() -> dict:
-    """Vault의 모든 노트 목록을 반환합니다. 엣지를 연결하기 전에 호출하여
-    정확한 링크 타깃(=노트 제목)을 확인하세요. dangling edge를 예방하는 핵심 도구.
+    """Vault의 모든 node 목록을 반환합니다. 엣지를 연결하기 전에 호출하여
+    정확한 링크 타깃(=node 제목)을 확인하세요. dangling edge를 예방하는 핵심 도구.
 
     Returns:
         {count, notes: [{title, type, moc, path}]}
@@ -427,29 +427,29 @@ def create_note(title: str, body: str, type: str = "Concept",
                 tags: Optional[list] = None, edges: Optional[list] = None,
                 sources: Optional[list] = None, folder: str = "20_Concepts",
                 embed: bool = True, resolve_links: bool = False) -> dict:
-    """새 메모리(지식 노드)를 생성합니다. 온톨로지 규격에 맞는 마크다운을 작성하고
+    """새 메모리 node를 생성합니다. 온톨로지 규격에 맞는 마크다운을 작성하고
     indexer를 트리거하여 UUID 발급·임베딩·9술어 검증까지 자동 수행합니다.
 
     ⚠️ 규칙:
-      - 파일은 '{title}.md'로 저장되며 title이 곧 다른 노트가 링크할 식별자입니다.
+      - 파일은 '{title}.md'로 저장되며 title이 곧 다른 node가 링크할 식별자입니다.
         제목은 명사형 단일 엔티티로, 파일명 금지문자를 쓰지 마세요.
-      - edges의 각 target은 '이미 존재하거나 곧 만들 노트의 정확한 제목'이어야 합니다.
+      - edges의 각 target은 '이미 존재하거나 곧 만들 node의 정확한 제목'이어야 합니다.
         먼저 list_notes()로 타깃 제목을 확인하면 dangling을 피할 수 있습니다.
       - predicate는 9개만 허용: requires, utilizes, implemented_by, extends,
         abstracts, causes, contradicts, replaces, defines.
 
     Args:
-        title: 노트 제목(=파일명, =링크 식별자)
+        title: node 제목(=파일명, =링크 식별자)
         body: 본문 마크다운 (정의 3문장 + 핵심 메커니즘 등)
-        type: 노트 타입 (기본 "Concept")
+        type: node 타입 (기본 "Concept")
         moc: 소속 MOC 제목 (예: "Philosophy MOC"). 자동으로 [[..]]로 감쌈
         aliases: 별칭 리스트
         tags: 태그 리스트
-        edges: [{"predicate","target","description"}] 리스트. source는 이 노트로 고정
+        edges: [{"predicate","target","description"}] 리스트. source는 이 node로 고정
         sources: 출처 문자열 리스트
         folder: 저장 폴더 (기본 "20_Concepts")
         embed: True면 생성 즉시 Ollama 임베딩 (Ollama 미가동 시 BM25-only)
-        resolve_links: True면 전체 엣지 재구성으로 '기존 노트→이 노트' dangling까지
+        resolve_links: True면 전체 엣지 재구성으로 '기존 node→이 node' dangling까지
             즉시 연결. 기본 False(빠름). 평소엔 reconcile_graph()를 주기 실행 권장.
 
     Returns:
@@ -459,7 +459,7 @@ def create_note(title: str, body: str, type: str = "Concept",
     title = _validate_title(title)
     if _find_note_path(title) is not None:
         raise ValueError(
-            f"이미 '{title}' 노트가 존재합니다. 수정하려면 update_note를 사용하세요."
+            f"이미 '{title}' node가 존재합니다. 수정하려면 update_note를 사용하세요."
         )
     norm_edges = _validate_edges(title, edges)
     md = _build_note_markdown(
@@ -469,9 +469,9 @@ def create_note(title: str, body: str, type: str = "Concept",
     note_path.parent.mkdir(parents=True, exist_ok=True)
     note_path.write_text(md, encoding="utf-8")
 
-    # 증분 인덱싱: 신규 노트 임베딩 + 자기 엣지 구성 (빠름)
+    # 증분 인덱싱: 신규 node 임베딩 + 자기 엣지 구성 (빠름)
     stats = _run_indexer(force=False, embed=embed)
-    # 이 노트를 향하던 '기존' dangling edge까지 즉시 잇고 싶을 때만 전체 재구성
+    # 이 node를 향하던 '기존' dangling edge까지 즉시 잇고 싶을 때만 전체 재구성
     if resolve_links:
         stats = _run_indexer(force=True, embed=False)
 
@@ -481,7 +481,7 @@ def create_note(title: str, body: str, type: str = "Concept",
     else:
         _mark_pending()
         if warnings:
-            warnings.append("기존 노트가 이 노트를 링크 중이라면 다음 검색 때 자동 정합으로 연결됩니다(또는 reconcile_graph()).")
+            warnings.append("기존 node가 이 node를 링크 중이라면 다음 검색 때 자동 정합으로 연결됩니다(또는 reconcile_graph()).")
     return {
         "created": str(note_path),
         "title": title,
@@ -501,13 +501,13 @@ def update_note(title: str, body: Optional[str] = None, edges: Optional[list] = 
                 aliases: Optional[list] = None, tags: Optional[list] = None,
                 sources: Optional[list] = None, embed: bool = True,
                 resolve_links: bool = False) -> dict:
-    """기존 노트의 본문/엣지/메타를 수정합니다. node_id·id·created 등 정체성은 보존합니다.
+    """기존 node의 본문/엣지/메타를 수정합니다. node_id·id·created 등 정체성은 보존합니다.
 
     인자를 주지 않은 항목은 기존 값을 유지합니다(예: body만 주면 엣지는 그대로).
     edges를 주면 엣지 섹션을 '통째로 교체'합니다(부분 추가는 upsert_edge 사용).
 
     Args:
-        title: 수정할 노트 제목
+        title: 수정할 node 제목
         body: 새 본문(주지 않으면 기존 intro 본문 유지)
         edges: 새 엣지 전체 [{"predicate","target","description"}] (주면 교체)
         type, moc, aliases, tags, sources: 주면 해당 메타만 갱신
@@ -516,7 +516,7 @@ def update_note(title: str, body: Optional[str] = None, edges: Optional[list] = 
     title = _validate_title(title)
     path = _find_note_path(title)
     if path is None:
-        raise ValueError(f"'{title}' 노트를 찾을 수 없습니다. 새로 만들려면 create_note를 쓰세요.")
+        raise ValueError(f"'{title}' node를 찾을 수 없습니다. 새로 만들려면 create_note를 쓰세요.")
     old = path.read_text(encoding="utf-8")
     meta = indexer_mod.parse_yaml_frontmatter(old)
 
@@ -586,15 +586,15 @@ def update_note(title: str, body: Optional[str] = None, edges: Optional[list] = 
 @mcp.tool()
 def upsert_edge(source_title: str, predicate: str, target_title: str,
                 description: Optional[str] = None) -> dict:
-    """기존 source 노트에 엣지 1개를 추가합니다(이미 있으면 무시).
+    """기존 source node에 엣지 1개를 추가합니다(이미 있으면 무시).
 
-    엣지는 항상 source 노트의 파일에 기록됩니다(indexer가 source 단위로 엣지를
-    재구성하기 때문). 따라서 source_title 노트가 반드시 존재해야 합니다.
+    엣지는 항상 source node의 파일에 기록됩니다(indexer가 source 단위로 엣지를
+    재구성하기 때문). 따라서 source_title node가 반드시 존재해야 합니다.
 
     Args:
-        source_title: 엣지를 추가할 노트 제목 (존재해야 함)
+        source_title: 엣지를 추가할 node 제목 (존재해야 함)
         predicate: 9개 화이트리스트 중 하나
-        target_title: 대상 노트 제목 (없으면 dangling 경고)
+        target_title: 대상 node 제목 (없으면 dangling 경고)
         description: 관계 설명(선택)
     """
     src = _validate_title(source_title)
@@ -610,7 +610,7 @@ def upsert_edge(source_title: str, predicate: str, target_title: str,
         raise ValueError("자기참조 edge는 금지입니다.")
     path = _find_note_path(src)
     if path is None:
-        raise ValueError(f"source 노트 '{src}'를 찾을 수 없습니다. 먼저 create_note로 만드세요.")
+        raise ValueError(f"source node '{src}'를 찾을 수 없습니다. 먼저 create_note로 만드세요.")
 
     text = path.read_text(encoding="utf-8")
     for e in indexer_mod.extract_edges_safely(text):
@@ -632,10 +632,10 @@ def upsert_edge(source_title: str, predicate: str, target_title: str,
 
 @mcp.tool()
 def remove_edge(source_title: str, predicate: str, target_title: str) -> dict:
-    """기존 source 노트에서 특정 엣지 라인을 제거합니다.
+    """기존 source node에서 특정 엣지 라인을 제거합니다.
 
     Args:
-        source_title: 엣지가 기록된 노트 제목
+        source_title: 엣지가 기록된 node 제목
         predicate: 제거할 엣지의 술어
         target_title: 제거할 엣지의 대상 제목
     """
@@ -643,7 +643,7 @@ def remove_edge(source_title: str, predicate: str, target_title: str) -> dict:
     tgt = (target_title or "").strip()
     path = _find_note_path(src)
     if path is None:
-        raise ValueError(f"source 노트 '{src}'를 찾을 수 없습니다.")
+        raise ValueError(f"source node '{src}'를 찾을 수 없습니다.")
     lines = path.read_text(encoding="utf-8").splitlines()
     kept, removed = [], 0
     for l in lines:
@@ -665,16 +665,16 @@ def remove_edge(source_title: str, predicate: str, target_title: str) -> dict:
 
 @mcp.tool()
 def delete_node(title: str) -> dict:
-    """노트를 안전하게 삭제합니다: .md 파일 + DB 노드 + 그 노드에 연결된 엣지(양방향).
+    """node를 안전하게 삭제합니다: .md 파일 + DB node + 그 node에 연결된 엣지(양방향).
 
-    indexer는 디스크에서 사라진 파일의 DB 노드를 자동 정리하지 않으므로,
+    indexer는 디스크에서 사라진 파일의 DB node를 자동 정리하지 않으므로,
     이 도구가 DB까지 직접 정리합니다.
 
-    주의: 다른 노트가 이 제목을 링크하고 있었다면 그 엣지는 dangling이 됩니다.
+    주의: 다른 node가 이 제목을 링크하고 있었다면 그 엣지는 dangling이 됩니다.
     sync_vault(force=True, embed=False)로 정리하세요.
 
     Args:
-        title: 삭제할 노트 제목
+        title: 삭제할 node 제목
     """
     t = _validate_title(title)
     path = _find_note_path(t)
@@ -709,11 +709,11 @@ def delete_node(title: str) -> dict:
 
     warnings = []
     if not node_removed:
-        warnings.append("DB에 해당 노드가 없었습니다(동기화 전이거나 title 불일치).")
+        warnings.append("DB에 해당 node가 없었습니다(동기화 전이거나 title 불일치).")
     if not file_removed:
         warnings.append("디스크에 .md 파일이 없었습니다.")
     warnings.append(
-        "다른 노트가 이 제목을 링크했다면 이제 dangling입니다. "
+        "다른 node가 이 제목을 링크했다면 이제 dangling입니다. "
         "sync_vault(force=True, embed=False)로 정리하세요."
     )
     return {
@@ -730,7 +730,7 @@ def reconcile_graph(embed: bool = False) -> dict:
     """전체 엣지를 재구성하여 그동안 쌓인 dangling edge를 일괄 해소합니다.
     (force 엣지 재구성. embed=False면 재임베딩 없이 빠르게 수행)
 
-    write 도구는 기본적으로 증분 인덱싱만 하므로, 새 노트가 '기존 노트로부터'
+    write 도구는 기본적으로 증분 인덱싱만 하므로, 새 node가 '기존 node로부터'
     받는 링크는 즉시 연결되지 않습니다. 이 도구(또는 sync_vault(force=True))를
     주기적으로 실행해 그래프를 정합 상태로 맞추세요. 대규모 vault에서도
     재임베딩이 없어 비용이 낮습니다.
