@@ -1,5 +1,4 @@
 {
-  "_comment": "이 파일을 .obsidian/graph.json으로 복사하면 그래프 뷰에서 90_Engine 폴더가 자동 제외됩니다.",
   "collapse-filter": false,
   "search": "-path:90_Engine/ -path:00_System/",
   "showTags": true,
@@ -54,6 +53,6 @@
   "repelStrength": 12,
   "linkStrength": 1,
   "linkDistance": 250,
-  "scale": 1,
+  "scale": 0.2588386562181615,
   "close": true
 }
