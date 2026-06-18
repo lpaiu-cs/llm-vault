@@ -226,6 +226,17 @@ def _resolve_policy(cfg):
     cw.update({k: float(v) for k, v in (cfg.get("confidence_weight") or {}).items()})
     sw = dict(STATUS_WEIGHT)
     sw.update({k: float(v) for k, v in (cfg.get("status_weight") or {}).items()})
+    # 파일 단위 override (layer보다 우선; 키는 vault 루트 기준 상대 경로)
+    files_cfg = cfg.get("files") or {}
+    fw, fi, fa = {}, {}, {}
+    for name, spec in files_cfg.items():
+        spec = spec or {}
+        if spec.get("weight") is not None:
+            fw[name] = float(spec["weight"])
+        if spec.get("default_include") is not None:
+            fi[name] = bool(spec["default_include"])
+        if spec.get("annotation") is not None:
+            fa[name] = str(spec["annotation"])
     return {
         "layer_weight": lw,
         "default_layer_weight": float(dl.get("weight", DEFAULT_LAYER_WEIGHT)),
@@ -233,6 +244,9 @@ def _resolve_policy(cfg):
         "default_include": bool(dl.get("default_include", DEFAULT_LAYER_INCLUDE)),
         "layer_annotation": la,
         "default_annotation": str(dl.get("annotation", DEFAULT_ANNOTATION)),
+        "file_weight": fw,
+        "file_include": fi,
+        "file_annotation": fa,
         "confidence_weight": cw,
         "default_confidence_weight": float(cfg.get("default_confidence_weight", DEFAULT_CONFIDENCE_WEIGHT)),
         "status_weight": sw,
@@ -282,9 +296,47 @@ def compute_rank_weight(layer, confidence, status, confidence_weighting=True, po
 
 
 def layer_included(layer, policy=None):
-    """기본 검색 스코프 포함 여부(필터). policy 미지정 시 fallback."""
+    """기본 검색 스코프 포함 여부(필터, 계층 기준). policy 미지정 시 fallback."""
     pol = policy or DEFAULT_RETRIEVAL_POLICY
     return pol["layer_include"].get(layer, pol["default_include"])
+
+
+# ── 노드 단위 해석: 파일 override(rel_path) > 계층(layer) ──
+def _node_base_weight(node, pol):
+    rel = node.get("rel_path")
+    if rel and rel in pol.get("file_weight", {}):
+        return pol["file_weight"][rel]
+    return pol["layer_weight"].get(node.get("layer"), pol["default_layer_weight"])
+
+
+def node_rank_weight(node, policy=None, confidence_weighting=True):
+    """노드의 최종 랭킹 가중치 = (파일 또는 계층 기본가중치) × confidence × status."""
+    pol = policy or DEFAULT_RETRIEVAL_POLICY
+    w = _node_base_weight(node, pol)
+    conf, status = node.get("confidence"), node.get("status")
+    if confidence_weighting and conf:
+        w *= pol["confidence_weight"].get(str(conf).lower(), pol["default_confidence_weight"])
+    if status:
+        w *= pol["status_weight"].get(str(status).lower(), pol["default_status_weight"])
+    return w
+
+
+def node_included(node, policy=None):
+    """노드의 기본 검색 포함 여부. 파일 override > 계층."""
+    pol = policy or DEFAULT_RETRIEVAL_POLICY
+    rel = node.get("rel_path")
+    if rel and rel in pol.get("file_include", {}):
+        return pol["file_include"][rel]
+    return pol["layer_include"].get(node.get("layer"), pol["default_include"])
+
+
+def node_annotation(node, policy=None):
+    """노드 주석. 파일 override > 계층."""
+    pol = policy or DEFAULT_RETRIEVAL_POLICY
+    rel = node.get("rel_path")
+    if rel and rel in pol.get("file_annotation", {}):
+        return pol["file_annotation"][rel]
+    return pol["layer_annotation"].get(node.get("layer"), pol["default_annotation"])
 
 
 # ─────────────────────────────────────────────────────────────
@@ -320,9 +372,11 @@ def normalize_vector(vec):
 # ─────────────────────────────────────────────────────────────
 # §3. 데이터 로더
 # ─────────────────────────────────────────────────────────────
-def load_vault_graph(db_path):
-    """DuckDB에서 노드/엣지 전체 로드 + 본문 텍스트 + 캐시된 임베딩."""
+def load_vault_graph(db_path, vault_root=None):
+    """DuckDB에서 노드/엣지 전체 로드 + 본문 텍스트 + 캐시된 임베딩.
+    vault_root를 주면 노드에 rel_path(파일 단위 정책용)를 함께 채운다."""
     conn = duckdb.connect(db_path, read_only=False)
+    vr = Path(vault_root).resolve() if vault_root else None
 
     nodes = {}
     rows = conn.execute("""
@@ -338,6 +392,12 @@ def load_vault_graph(db_path):
         except Exception:
             content = ""
         fm = parse_frontmatter_fields(content)
+        rel = None
+        if vr:
+            try:
+                rel = path.resolve().relative_to(vr).as_posix()
+            except (ValueError, OSError):
+                rel = None
         nodes[nid_str] = {
             "node_id": nid_str,
             "title": title,
@@ -346,6 +406,7 @@ def load_vault_graph(db_path):
             "moc": moc,
             "md5_hash": md5,
             "file_path": str(path),
+            "rel_path": rel,
             "content": content,
             "embedding_model": emb_model,
             "has_embedding": embedding is not None,
@@ -605,7 +666,7 @@ class Retriever:
                            else Path(db_path).resolve().parent.parent)
         self.policy, self.policy_source = load_retrieval_policy(
             self.vault_root, explicit_path=policy_path)
-        self.conn, self.nodes, self.edges = load_vault_graph(db_path)
+        self.conn, self.nodes, self.edges = load_vault_graph(db_path, self.vault_root)
         n_with_emb = sum(1 for n in self.nodes.values() if n["has_embedding"])
         print(f"[*] Loaded {len(self.nodes)} nodes, {len(self.edges)} edges "
               f"({n_with_emb} with embedding)")
@@ -625,31 +686,35 @@ class Retriever:
         confidence_weighting: confidence(low/medium) 강등 적용 여부 (기본 True)
         """
         pol = self.policy
-        all_layers = {n.get("layer") for n in self.nodes.values()}
 
-        # ── 검색 스코프(allowed layers) 결정: 필터는 정책의 default_include로 ──
+        # ── 검색 스코프: 노드 단위 필터(파일 override > 계층 default_include) ──
         if include_layers is not None:
-            allowed_layers = set(include_layers)
+            sel = set(include_layers)
+            allowed_ids = {nid for nid, n in self.nodes.items()
+                           if n.get("layer") in sel}
         else:
-            allowed_layers = {L for L in all_layers if layer_included(L, pol)}
-            if include_reviews:  # 기본 제외 계층(60/70/80 등)까지 포함
-                allowed_layers |= {L for L in all_layers if not layer_included(L, pol)}
+            allowed_ids = set()
+            for nid, n in self.nodes.items():
+                inc = node_included(n, pol)
+                if include_reviews and not inc:  # 기본 제외 계층/파일까지 포함
+                    inc = True
+                if inc:
+                    allowed_ids.add(nid)
             if not include_raw:
-                allowed_layers.discard(RAW_LAYER)
+                allowed_ids -= {nid for nid in allowed_ids
+                                if self.nodes[nid].get("layer") == RAW_LAYER}
             if exclude_layers:
-                allowed_layers -= set(exclude_layers)
-        allowed_ids = {nid for nid, n in self.nodes.items()
-                       if n.get("layer") in allowed_layers}
+                ex = set(exclude_layers)
+                allowed_ids -= {nid for nid in allowed_ids
+                                if self.nodes[nid].get("layer") in ex}
 
-        # ── 랭킹 가중치(계층 × 신뢰도 × 상태)와 주석은 정책 기반 ──
+        # ── 랭킹 가중치·주석: 노드 단위(파일 override > 계층) ──
         weights = {
-            nid: compute_rank_weight(n.get("layer"), n.get("confidence"),
-                                     n.get("status"), confidence_weighting, pol)
+            nid: node_rank_weight(n, pol, confidence_weighting)
             for nid, n in self.nodes.items()
         }
         annotations = {
-            nid: pol["layer_annotation"].get(n.get("layer"), pol["default_annotation"])
-            for nid, n in self.nodes.items()
+            nid: node_annotation(n, pol) for nid, n in self.nodes.items()
         }
 
         seed_ids, mode = hybrid_seed_search(
@@ -671,7 +736,9 @@ class Retriever:
         output["scope"] = {
             "include_raw": include_raw,
             "include_reviews": include_reviews,
-            "allowed_layers": sorted(l for l in allowed_layers if l),
+            "allowed_layers": sorted({self.nodes[nid].get("layer")
+                                      for nid in allowed_ids
+                                      if self.nodes[nid].get("layer")}),
             "policy_source": self.policy_source or "built-in fallback",
         }
         return output

@@ -79,7 +79,15 @@ DEFAULT_EMBED_MODEL = "bge-m3"
 #                (b) graph_node=False라 wikilink/edge 타깃이 되지 않는다(링크는
 #                source_path로만). retriever에서 낮은 가중치로 강등된다.
 #   - 그 외(10/20/30/40/50/60/70/80) : 해석 계층 → node+edge 풀 인덱싱.
-ALWAYS_EXCLUDE_PARTS = ("90_Engine", ".git", ".obsidian")
+ALWAYS_EXCLUDE_PARTS = (
+    "90_Engine", ".git", ".obsidian",
+    # 가상환경·도구 디렉터리: 패키지 문서(.md)가 vault에 섞이지 않게 제외
+    ".venv", "venv", "env", "ENV", ".env", "node_modules", "__pycache__", ".trash",
+)
+
+# 루트 프로젝트 메타 문서: vault 지식이 아니라 도구 설명서이므로 인덱싱 제외.
+# (AGENTS.md는 제외하지 않고 retriever에서 낮은 가중치로 강등한다 — Retrieval Policy.yaml)
+ROOT_DOC_EXCLUDE = ("README.md", "SETUP.md")
 
 LAYER_POLICY = {
     "05_Inbox": {"index": False, "embed": False, "parse_edges": False,
@@ -106,6 +114,11 @@ def policy_for(path, vault_root):
         return {"layer": None, "index": False, "embed": False,
                 "parse_edges": False, "graph_node": False, "role": "engine"}
     layer = layer_of(path, vault_root)
+    # 루트 메타 문서(README/SETUP)는 node로 만들지 않는다.
+    # (루트 파일은 layer_of가 파일명을 반환하므로 layer == name 이면 vault 루트 직속)
+    if path.name in ROOT_DOC_EXCLUDE and layer == path.name:
+        return {"layer": layer, "index": False, "embed": False,
+                "parse_edges": False, "graph_node": False, "role": "doc-excluded"}
     base = LAYER_POLICY.get(layer, DEFAULT_POLICY)
     return {"layer": layer, **base}
 

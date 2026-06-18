@@ -69,6 +69,15 @@ default_layer:
   weight: 0.8
   annotation: ""
 
+# 파일 단위 override (layer보다 우선). 키는 vault 루트 기준 상대 경로.
+# README.md / SETUP.md는 인덱서가 아예 node로 만들지 않으므로 여기 없어도 된다.
+# AGENTS.md는 검색은 되되 일반 지식보다 강하게 강등한다(에이전트 지침이지 지식 아님).
+files:
+  AGENTS.md:
+    default_include: true
+    weight: 0.3
+    annotation: agent instructions
+
 # 신뢰도(frontmatter confidence) 가중치. 미표기는 default(패널티 없음).
 confidence_weight:
   high: 1.0

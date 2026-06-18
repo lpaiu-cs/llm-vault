@@ -85,7 +85,9 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "bge-m3")
 # 주의: 이는 "검색 인덱싱" 제외와 다르다. indexer는 06_Raw를 full-text 전용으로
 # 인덱싱(검색 가능)하되 graph_node=False라 링크 타깃은 아니다. 즉 이 목록과
 # indexer의 policy_for(graph_node=False)는 일관된다. 05_Inbox만 완전 제외.
-EXCLUDE_PARTS = ("90_Engine", ".git", ".obsidian", "05_Inbox", "06_Raw")
+EXCLUDE_PARTS = ("90_Engine", ".git", ".obsidian", "05_Inbox", "06_Raw",
+                 ".venv", "venv", "env", "ENV", ".env", "node_modules",
+                 "__pycache__", ".trash")
 EDGE_HEADING = "## 핵심 엣지"
 EMPTY_EDGE_PLACEHOLDER = "<!-- 아직 엣지 없음 -->"
 

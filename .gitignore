@@ -85,6 +85,8 @@ ehthumbs.db
 mcp_config_local.json
 claude_desktop_config.local.json
 .cursor/
+.mcp.json
+.claude/
 
 # ─────────────────────────────────────────────────────────
 # 로컬 임시 작업
