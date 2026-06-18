@@ -280,22 +280,34 @@ git push                       # origin(private)로 백업 (개인 데이터 포
 scripts/sync-template.sh <커밋…>   # 템플릿 안전 커밋만 골라 upstream(public)에 반영
 ```
 
-**경계:**
+**경계 (allowlist 기준 — "기본 차단, 명시적 허용"):**
 
-| 구분 | 경로 |
-|------|------|
-| 개인 전용(공개 금지) | `05_Inbox/`, `06_Raw/`, `50_Source_Summaries/`, 그리고 개인 항목이 담긴 `30_Projects/`·`40_Decisions/`·`60_*`·`70_*`·`80_*` |
-| 템플릿 안전(공개 가능) | `90_Engine/`, `00_System/` 정책, `10_MOC`·`20_Concepts` 예시 코퍼스, `docs/`, `README.md`, `SETUP.md`, `AGENTS.md`, `scripts/` |
+공개 허용 경로는 [`scripts/template-allowlist.txt`](scripts/template-allowlist.txt)에
+명시되어 있고, 동기화 스크립트는 **여기에 없는 경로가 하나라도 섞이면 push를 중단**합니다.
+
+| 구분 | 경로 | allowlist |
+|------|------|-----------|
+| 개인 전용(공개 금지) | `05_Inbox/`, `06_Raw/`, `50_Source_Summaries/` 콘텐츠, `30_Projects/`·`40_Decisions/`·`60_*`·`70_*`·`80_*`의 개인 항목 | 미등록 → **기본 차단** |
+| 템플릿 안전(공개 가능) | `90_Engine/`, `docs/`, `scripts/`, `00_System/`, `10_MOC/`, `20_Concepts/`, 루트 문서(`README/SETUP/AGENTS/LICENSE/requirements`), 데이터 계층의 `README`·`.gitkeep`, 개별 opt-in한 template-safe 노트 | 등록 → 허용 |
+
+`30_Projects/`·`40_Decisions/` 등 해석 계층은 **디렉터리 전체가 아니라 개별 파일만** 허용에
+등록됩니다. 즉 새 개인 프로젝트/결정 노트는 자동으로 차단되고, 공개하려면 의식적으로
+allowlist에 한 줄을 추가해야 합니다.
 
 **원칙:**
 
 - 템플릿 변경과 개인 데이터를 **별도 커밋**으로 분리하면 선별 반영(cherry-pick)이 깔끔합니다.
 - 개인 데이터가 생긴 뒤에는 **`git push upstream main`을 직접 하지 마세요**(유출 위험).
-  반드시 `scripts/sync-template.sh`를 쓰세요 — 이 스크립트는 `05_Inbox/06_Raw/
-  50_Source_Summaries` 경로가 섞이면 push를 자동 중단합니다.
+  반드시 `scripts/sync-template.sh`를 쓰세요. 가드는 2단계입니다:
+  1. **allowlist** — 변경 파일이 `template-allowlist.txt`에 없으면 중단(1차 방어).
+  2. **denylist** — `05_Inbox/06_Raw/50_Source_Summaries` 콘텐츠는 재차 명시적 차단(보조).
+- 공개할 새 파일이 늘면 `template-allowlist.txt`에 추가하기 전에 "정말 개인정보가
+  없는가?"를 먼저 확인하세요. 매칭 규칙은 `scripts/test-template-allowlist.sh`로 검증합니다.
 
 ```bash
-# 예: 174e250(엔진 개선) 커밋만 공개 템플릿에 반영
+# 먼저 push 없이 가드만 점검(권장)
+scripts/sync-template.sh --dry-run 174e250
+# 통과하면 실제 반영
 scripts/sync-template.sh 174e250
 ```
 
@@ -321,6 +333,15 @@ ollama pull bge-m3
 ### `[REJECT] 화이트리스트 외 술어`
 
 9개 predicate 외 단어를 edge에 사용한 상태입니다. 온톨로지 헌법의 fallback rule에 맞춰 허용 predicate로 바꾸세요.
+
+### `[ABORT] allowlist에 없는 경로가 있어 공개 push를 중단합니다`
+
+`scripts/sync-template.sh`의 1차 가드입니다. 동기화하려는 커밋에 공개 허용 목록
+([`scripts/template-allowlist.txt`](scripts/template-allowlist.txt))에 없는 경로가
+포함됐다는 뜻입니다. 출력된 파일이 **개인 데이터면** 해당 커밋을 동기화 대상에서 빼고
+(템플릿 변경만 별도 커밋으로 분리), **정말 공개해도 되는 템플릿 파일이면** allowlist에
+한 줄 추가한 뒤 다시 실행하세요. 추가 전에 `scripts/test-template-allowlist.sh`로
+규칙을 점검할 수 있습니다.
 
 ### `Constraint Error: ... still referenced by a foreign key`
 

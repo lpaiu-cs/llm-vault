@@ -1,0 +1,50 @@
+# scripts/template-allowlist.txt
+# ─────────────────────────────────────────────────────────────
+# 공개 템플릿(upstream)에 올라가도 되는 경로만 명시한다(allowlist).
+# sync-template.sh는 변경 파일이 이 목록 중 하나에도 매칭되지 않으면 push를 중단한다.
+# "기본 차단, 명시적 허용" 원칙 — 개인 데이터가 어느 계층에 들어가든 실수로 공개되지 않게 한다.
+#
+# 규칙:
+#   - 끝이 '/' 이면 그 디렉터리 전체 허용 (예: 90_Engine/)
+#   - 그 외에는 정확 매칭 ('*' 글롭 사용 가능)
+#   - '#' 이후는 주석, 빈 줄 무시
+#
+# 새 파일을 공개하려면 여기에 한 줄 추가한다. "정말 개인정보가 없는가?"를 먼저 확인할 것.
+
+# ── 루트 문서/메타 (코드·설명만, 개인 데이터 없음) ──
+README.md
+SETUP.md
+AGENTS.md
+LICENSE
+requirements.txt
+.gitignore
+
+# ── 엔진·문서·스크립트 (런타임 코드/도구) ──
+90_Engine/
+docs/
+scripts/
+
+# ── 시스템 정책 + 구조 계층 (개인 지식이 아니라 템플릿 골격) ──
+00_System/
+10_MOC/
+20_Concepts/
+#   주의: 20_Concepts/ 는 지식 계층이라 개인 노트가 섞일 수 있다. 개인 개념이 쌓이면
+#   이 줄을 지우고 공개할 개념 파일만 개별 허용으로 좁혀라.
+
+# ── 데이터 계층: 구조 파일(README/.gitkeep)만 허용, 콘텐츠는 차단 ──
+05_Inbox/README.md
+05_Inbox/.gitkeep
+06_Raw/README.md
+06_Raw/.gitkeep
+50_Source_Summaries/README.md
+50_Source_Summaries/.gitkeep
+30_Projects/README.md
+40_Decisions/README.md
+60_Open_Questions/README.md
+70_Contradictions/README.md
+80_Reviews/README.md
+
+# ── template-safe 콘텐츠 개별 opt-in (신중히 추가; 개인 항목 생기면 절대 추가 금지) ──
+30_Projects/LLM Second Brain.md
+40_Decisions/2026-06-18-second-brain-architecture.md
+40_Decisions/2026-06-18-layer-and-confidence-aware-retrieval.md
