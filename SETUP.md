@@ -268,16 +268,21 @@ python3 90_Engine/eval_retrieval.py \
 (원본 과다노출)를 보고 `Retrieval Policy.yaml`을 조정하세요. 자세한 내용은
 [40_Decisions/2026-06-18-layer-and-confidence-aware-retrieval.md](40_Decisions/2026-06-18-layer-and-confidence-aware-retrieval.md).
 
-## 8. 템플릿/개인 데이터 분리와 공개 동기화
+## 8. public 템플릿 vs private 인스턴스
 
-이 워킹 카피는 두 리모트로 운영합니다.
+이 프로젝트는 **두 개의 별개 레포**로 운영합니다. 역할이 다릅니다.
 
-- **`origin` = 개인 private 레포** — 일상 작업·백업. 개인 데이터는 여기에만.
-- **`upstream` = 공개 템플릿 레포** — 엔진/정책/문서 같은 템플릿 개선만 반영.
+- **public `llm-vault` (`upstream`) = 프레임워크 템플릿** — 누구나 scratch에서 시작할 수
+  있는 골격입니다. 담는 것: 엔진(`90_Engine/`) + 정책(`00_System/`) + 문서/스크립트 +
+  **빈 vault 스켈레톤**(지식 계층은 `README/.gitkeep`만) + `examples/mini-vault/`(데모).
+  실제 지식 코퍼스는 담지 않습니다.
+- **private `llm-vault-private` (`origin`) = 실제 second brain 인스턴스** — 당신의 진짜
+  지식이 `10_MOC/`·`20_Concepts/`·`30_Projects/`·`40_Decisions/`·`50~80`에 쌓이는 곳.
+  개인 데이터는 **오직 여기에만** 둡니다.
 
 ```bash
-git push                       # origin(private)로 백업 (개인 데이터 포함 OK)
-scripts/sync-template.sh <커밋…>   # 템플릿 안전 커밋만 골라 upstream(public)에 반영
+git push                          # origin(private)로 백업 (실제 지식 포함 OK)
+scripts/sync-template.sh <커밋…>   # 프레임워크 개선만 골라 upstream(public)에 반영
 ```
 
 **경계 (allowlist 기준 — "기본 차단, 명시적 허용"):**
@@ -287,12 +292,18 @@ scripts/sync-template.sh <커밋…>   # 템플릿 안전 커밋만 골라 upstr
 
 | 구분 | 경로 | allowlist |
 |------|------|-----------|
-| 개인 전용(공개 금지) | `05_Inbox/`, `06_Raw/`, `50_Source_Summaries/` 콘텐츠, `30_Projects/`·`40_Decisions/`·`60_*`·`70_*`·`80_*`의 개인 항목 | 미등록 → **기본 차단** |
-| 템플릿 안전(공개 가능) | `90_Engine/`, `docs/`, `scripts/`, `00_System/`, `10_MOC/`, `20_Concepts/`, 루트 문서(`README/SETUP/AGENTS/LICENSE/requirements`), 데이터 계층의 `README`·`.gitkeep`, 개별 opt-in한 template-safe 노트 | 등록 → 허용 |
+| 프레임워크 (공개) | `90_Engine/`, `docs/`, `scripts/`, `00_System/`, `examples/`, 루트 문서(`README/SETUP/AGENTS/LICENSE/requirements`) | 등록 → 허용 |
+| vault 스켈레톤 (공개) | 모든 지식 계층의 `README.md`·`.gitkeep` **만** | 등록 → 허용 |
+| 실제 지식 (private 전용) | `10_MOC/`·`20_Concepts/`·`30_Projects/`·`40_Decisions/`·`50~80`의 **모든 콘텐츠 파일**, `05_Inbox/`·`06_Raw/` 콘텐츠 | 미등록 → **기본 차단** |
 
-`30_Projects/`·`40_Decisions/` 등 해석 계층은 **디렉터리 전체가 아니라 개별 파일만** 허용에
-등록됩니다. 즉 새 개인 프로젝트/결정 노트는 자동으로 차단되고, 공개하려면 의식적으로
-allowlist에 한 줄을 추가해야 합니다.
+즉 지식 계층은 **디렉터리 통째 허용이 없습니다.** 어떤 계층에 무엇을 적든 콘텐츠 파일은
+기본 차단되므로, public에 노출하려면 의식적인 결정이 필요합니다. 공개용 예시는
+`examples/mini-vault/`에 최소한만 둡니다(README/.gitkeep 외 실제 노트는 main vault에 두지 않음).
+
+> **structure 분기 운영**: public main vault를 스켈레톤으로 유지하면서 private main vault에는
+> 실제 지식을 쌓으려면, public 정리는 private 워킹카피가 아니라 별도 worktree에서 합니다.
+> `git worktree add -b public-main ../llm-vault-public upstream/main` 후 거기서 스켈레톤/예시를
+> 관리하고 upstream에 push합니다. private main을 비우는 커밋은 만들지 않습니다.
 
 **원칙:**
 

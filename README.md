@@ -6,6 +6,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
 
+> **📦 이 저장소는 "프레임워크 템플릿"입니다.** 엔진(`90_Engine/`) + 정책(`00_System/`) +
+> 문서/스크립트 + **빈 vault 스켈레톤**(지식 계층은 `README`만) + 동작을 보여주는
+> [`examples/mini-vault/`](examples/mini-vault/)로 구성됩니다. **실제 지식은 담겨 있지
+> 않습니다.** 자신의 second brain으로 쓰려면 이 템플릿을 복제해 **개인 private 인스턴스**를
+> 만들고, 실제 지식은 거기에만 쌓으세요. 경계·운영법은 [SETUP.md](SETUP.md) §8 참조.
+
 ## 이게 뭔가요?
 
 `llm-vault`는 Obsidian 호환 Markdown vault, 출처 기반(source-grounded) 아카이브 규율,

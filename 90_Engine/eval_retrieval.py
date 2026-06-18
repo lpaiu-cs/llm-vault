@@ -172,12 +172,14 @@ def check_thresholds(metrics, thresholds):
 
 def main():
     ap = argparse.ArgumentParser(description="Retrieval quality evaluation")
-    ap.add_argument("--db", default="90_Engine/ltm_cache.db")
-    ap.add_argument("--queries", default=str(Path(__file__).parent / "eval_queries.sample.json"))
+    # 기본값은 재현 가능한 데모 픽스처(examples/mini-vault)를 가리킨다. 실제 vault를
+    # 평가하려면 --vault-root . --db 90_Engine/ltm_cache.db --queries <real>.json 로 덮어쓴다.
+    ap.add_argument("--db", default="examples/mini-vault/fixture.db")
+    ap.add_argument("--queries", default="examples/mini-vault/eval_queries.json")
     ap.add_argument("--top-k", type=int, default=5)
     ap.add_argument("--hops", type=int, default=2)
     ap.add_argument("--policy", default=None, help="Retrieval Policy 파일 override")
-    ap.add_argument("--vault-root", default=None)
+    ap.add_argument("--vault-root", default="examples/mini-vault")
     ap.add_argument("--ollama-url", default="http://localhost:11434")
     ap.add_argument("--ollama-model", default="bge-m3")
     ap.add_argument("--include-reviews", action="store_true")
