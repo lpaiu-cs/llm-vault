@@ -98,6 +98,27 @@ LAYER_POLICY = {
 DEFAULT_POLICY = {"index": True, "embed": True, "parse_edges": True,
                   "graph_node": True, "role": "knowledge"}
 
+# 06_Raw 하위 폴더별 임베딩(dense 검색) 정책.
+#   - index=True는 06_Raw 전체에 동일 적용 → embed=False여도 BM25/full-text 검색은 유지된다.
+#   - embed=False는 "Ollama dense 임베딩을 만들지 않는다"는 뜻일 뿐, 검색에서 빠지는 게 아니다.
+#   - parse_edges=False, graph_node=False는 06_Raw 전체에 그대로 유지(하위 폴더 무관).
+#
+# ⚠️ 이 정책은 **private second brain 인스턴스 기준**이다. public 템플릿에는 실제 raw가
+#   절대 포함되지 않는다(README 스켈레톤만; sync guard/allowlist로 차단).
+#   admin-records(행정/건강/복무/증빙/상담)는 민감하지만, 그렇기에 오히려 "나"를 잘
+#   반영하는 중요한 기억이라 private 안에서 의미검색이 되도록 embed=True로 둔다.
+#   이는 민감정보 임베딩이 보안상 안전하다는 뜻이 아니라, **private-only 운영을 전제로 한
+#   의식적 선택**이다(유출 방지는 public/private 분리·sync guard가 담당).
+RAW_SUBFOLDER_EMBED = {
+    "chats":         True,
+    "papers":        True,
+    "project-logs":  True,
+    "admin-records": True,   # 민감하지만 private-only 전제하에 의미검색 허용(의식적 선택)
+    "code-logs":     False,  # 코드/에러 로그 → BM25로 충분, dense 비용 절약
+    "screenshots":   False,  # OCR/캡션 → BM25로 충분
+}
+RAW_SUBFOLDER_EMBED_DEFAULT = False  # 분류 안 된 raw 하위 폴더/직속 파일은 BM25-only
+
 
 def layer_of(path, vault_root):
     """경로의 최상위 계층 폴더명(예: '20_Concepts')을 반환. 못 찾으면 None."""
@@ -106,6 +127,16 @@ def layer_of(path, vault_root):
     except (ValueError, OSError):
         return None
     return rel.parts[0] if rel.parts else None
+
+
+def raw_subfolder_of(path, vault_root):
+    """06_Raw 직하위 폴더명(예: 'admin-records')을 반환. 폴더 없이 06_Raw 직속이면 None."""
+    try:
+        rel = path.resolve().relative_to(Path(vault_root).resolve())
+    except (ValueError, OSError):
+        return None
+    # rel.parts 예: ('06_Raw', 'admin-records', 'file.md') → 하위 폴더 존재
+    return rel.parts[1] if len(rel.parts) >= 3 else None
 
 
 def policy_for(path, vault_root):
@@ -120,6 +151,11 @@ def policy_for(path, vault_root):
         return {"layer": layer, "index": False, "embed": False,
                 "parse_edges": False, "graph_node": False, "role": "doc-excluded"}
     base = LAYER_POLICY.get(layer, DEFAULT_POLICY)
+    # 06_Raw: index/edge/graph 정책은 유지하되 embed만 하위 폴더별로 차등한다.
+    if layer == "06_Raw":
+        sub = raw_subfolder_of(path, vault_root)
+        embed = RAW_SUBFOLDER_EMBED.get(sub, RAW_SUBFOLDER_EMBED_DEFAULT)
+        return {"layer": layer, **base, "embed": embed, "raw_subfolder": sub}
     return {"layer": layer, **base}
 
 

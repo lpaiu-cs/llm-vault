@@ -96,14 +96,22 @@ status_weight:
   stale: 0.4
 default_status_weight: 1.0
 
-# 06_Raw 임베딩 정책 (현재: 전부 임베딩 = dense 검색 가능).
-# TODO(engine): 하위 폴더별로 embed/search 조정 가능하게 열어둔다. 예)
-#   raw_policy:
-#     embed: true
-#     subfolders:
-#       06_Raw/screenshots:
-#         embed: false   # OCR 캡션만 BM25로
-#       06_Raw/papers:
-#         embed: true
+# 06_Raw 임베딩 정책 — 하위 폴더별 dense 임베딩 차등.
+#   ⚠️ 적용 지점(authoritative)은 90_Engine/indexer.py 의 RAW_SUBFOLDER_EMBED 상수다.
+#      아래는 그 정책을 사람이 읽기 위한 문서(미러)이며, 값을 바꾸려면 indexer.py를 고친다.
+#   - 06_Raw 전체: index=true, parse_edges=false, graph_node=false (불변).
+#   - embed=false여도 BM25/full-text 검색은 유지된다(검색에서 빠지는 게 아님).
+#   - 이 정책은 **private second brain 인스턴스 기준**이다. public 템플릿에는 실제 raw가
+#     포함되지 않는다(sync guard/allowlist가 차단).
+#   - admin-records는 민감하지만 그렇기에 "나"를 잘 반영하는 기억이라, private-only 운영을
+#     전제로 의미검색이 되게 embed=true로 둔다. 보안상 안전하다는 뜻이 아니라 의식적 선택이다.
 raw_policy:
-  embed: true
+  embed: true            # (참고용 기본값; 실제는 하위 폴더별로 아래 적용)
+  subfolders:
+    chats:         { embed: true }
+    papers:        { embed: true }
+    project-logs:  { embed: true }
+    admin-records: { embed: true }   # 민감, private-only 전제하의 의식적 선택
+    code-logs:     { embed: false }  # BM25-only
+    screenshots:   { embed: false }  # BM25-only (OCR/캡션)
+  default: { embed: false }          # 분류 안 된 raw → BM25-only
