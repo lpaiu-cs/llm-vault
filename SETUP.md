@@ -162,43 +162,42 @@ OLLAMA_MODEL = "bge-m3"
 ### Claude Code (CLI/IDE) 연결
 
 Claude Code는 **프로젝트 루트의 `.mcp.json`을 자동 인식**합니다(첫 사용 시 승인 프롬프트).
-같은 `mcpServers` 구조를 쓰되, `command`는 의존성이 설치된 Python을 가리킵니다(예: 이
-저장소의 `.venv`). `.mcp.json`은 절대 경로를 포함하므로 커밋하지 않습니다(`.gitignore`).
+`command`는 의존성이 설치된 Python(예: 이 저장소의 `.venv`)을, `args`는 서버 스크립트를
+가리킵니다.
 
-저장소에 포함된 [`.mcp.json.example`](.mcp.json.example)을 복사해 쓰는 것이 가장 빠릅니다:
+저장소에 포함된 [`.mcp.json.example`](.mcp.json.example)을 복사해 **절대경로 2곳만** 고치면 됩니다:
 
 ```bash
 cp .mcp.json.example .mcp.json
-# .mcp.json 을 열어 <REPO> 4곳을 이 기기의 저장소 절대경로로 치환
+# .mcp.json 을 열어 command/args 의 <REPO> 를 이 기기의 저장소 절대경로로 치환
 ```
-
-복사본(`<REPO>`를 실제 경로로 바꾼 `.mcp.json`)은 다음과 같습니다:
 
 ```json
 {
   "mcpServers": {
     "llm-vault": {
       "command": "<REPO>/.venv/bin/python",
-      "args": ["<REPO>/90_Engine/mcp_server.py"],
-      "env": {
-        "VAULT_ROOT": "<REPO>",
-        "VAULT_DB": "<REPO>/90_Engine/ltm_cache.db",
-        "OLLAMA_URL": "http://localhost:11434",
-        "OLLAMA_MODEL": "bge-m3"
-      }
+      "args": ["<REPO>/90_Engine/mcp_server.py"]
     }
   }
 }
 ```
 
-또는 터미널에서 한 줄로 등록(사용자 스코프):
+`env` 블록은 **생략 가능**합니다 — 서버가 `mcp_server.py`의 위치에서 `VAULT_ROOT`/`VAULT_DB`를,
+기본값에서 `OLLAMA_URL`(localhost:11434)/`OLLAMA_MODEL`(bge-m3)을 스스로 유도합니다. 바꾸고
+싶을 때만 `env`로 덮어쓰세요.
+
+> **왜 `.mcp.json`을 커밋하지 않나(`.gitignore`)?** 비밀값이라서가 아니라, `.mcp.json`이
+> **절대경로만** 허용하기 때문입니다(상대경로는 에러, `${CLAUDE_PROJECT_DIR}`는
+> project-scoped 파일의 command/args에서 신뢰성 있게 확장되지 않음). 그 절대경로가
+> 기기·OS마다 다르므로(특히 `.venv/bin` vs `.venv\Scripts`) 커밋하면 다른 기기에서
+> 깨집니다. 그래서 머신 로컬로 두고 `.example`만 공유합니다.
+
+또는 터미널에서 한 줄로 등록(사용자 스코프, `env`는 기본값을 바꿀 때만):
 
 ```bash
-claude mcp add llm-vault \
-  --env VAULT_ROOT=<REPO> \
-  --env VAULT_DB=<REPO>/90_Engine/ltm_cache.db \
-  --env OLLAMA_URL=http://localhost:11434 --env OLLAMA_MODEL=bge-m3 \
-  -- <REPO>/.venv/bin/python <REPO>/90_Engine/mcp_server.py
+claude mcp add llm-vault -- <REPO>/.venv/bin/python <REPO>/90_Engine/mcp_server.py
+# 기본값을 바꾸려면 끝에 --env KEY=VAL 추가(예: --env OLLAMA_MODEL=다른모델)
 ```
 
 등록 후 Claude Code를 재시작하면 `retrieve_knowledge`, `review_queue`, `vault_stats`,
