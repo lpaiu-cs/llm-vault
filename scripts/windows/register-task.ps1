@@ -27,10 +27,15 @@ if (-not (Test-Path $syncScript)) {
     exit 1
 }
 
-# Windows PowerShell 5.1(항상 존재)로 sync.ps1 실행. 경로 공백 대비해 따옴표로 감쌈.
-$psExe = (Get-Command powershell.exe).Source
-$action = New-ScheduledTaskAction -Execute $psExe `
-    -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$syncScript`"" `
+# 창 깜빡임 방지: powershell.exe 를 직접 띄우면 conhost 가 먼저 떠서 검은 창이
+# 번쩍인다. wscript.exe 로 sync-hidden.vbs 를 실행하면 창이 아예 안 뜬다.
+$vbs = Join-Path $PSScriptRoot 'sync-hidden.vbs'
+if (-not (Test-Path $vbs)) {
+    Write-Error "sync-hidden.vbs 를 찾을 수 없습니다: $vbs"
+    exit 1
+}
+$action = New-ScheduledTaskAction -Execute 'wscript.exe' `
+    -Argument "`"$vbs`"" `
     -WorkingDirectory $repo
 
 # 트리거: 로그온 시 + 15분마다(아주 긴 기간 동안 반복)

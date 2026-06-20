@@ -302,6 +302,11 @@ Get-ScheduledTaskInfo -TaskName 'llm-vault-sync'    # LastRunResult 확인
 # 제거: Unregister-ScheduledTask -TaskName 'llm-vault-sync' -Confirm:$false
 ```
 
+작업은 `scripts\windows\sync-hidden.vbs`(wscript) 경유로 실행되어 **검은 cmd 창이 뜨지
+않습니다.** powershell.exe 를 직접 띄우면 `-WindowStyle Hidden` 을 줘도 conhost 때문에
+창이 깜빡이므로, VBScript 로 감싸 창을 생성 단계부터 숨깁니다. 이미 옛 버전으로
+등록해 창이 깜빡인다면 `git pull` 후 위 명령을 **다시 실행**하면 됩니다(`-Force` 로 갱신).
+
 > ⚠️ 자동 실행을 켜면 **첫 실행이 그 시점의 미커밋 변경을 전부 자동 커밋**합니다(클라우드
 > 동기화 취지상 의도된 동작). 진행 중인 작업을 따로 정리하고 싶다면 켜기 전에 정리하세요.
 >
