@@ -20,6 +20,7 @@ AGENTS.md
 LICENSE
 requirements.txt
 .gitignore
+.mcp.json.example
 
 # ── 프레임워크: 엔진·문서·스크립트·예시 ──
 90_Engine/

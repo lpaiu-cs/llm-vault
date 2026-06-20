@@ -1,0 +1,15 @@
+{
+  "_comment": "Claude Code 가 프로젝트 루트에서 자동 인식하는 MCP 설정의 템플릿입니다. 이 파일을 .mcp.json 으로 복사한 뒤(cp .mcp.json.example .mcp.json) <REPO> 를 이 기기의 저장소 절대경로로 바꾸세요. .mcp.json 자체는 절대경로를 담으므로 커밋하지 않습니다(.gitignore). 자세한 내용은 SETUP.md §4 참조.",
+  "mcpServers": {
+    "llm-vault": {
+      "command": "<REPO>/.venv/bin/python",
+      "args": ["<REPO>/90_Engine/mcp_server.py"],
+      "env": {
+        "VAULT_ROOT": "<REPO>",
+        "VAULT_DB": "<REPO>/90_Engine/ltm_cache.db",
+        "OLLAMA_URL": "http://localhost:11434",
+        "OLLAMA_MODEL": "bge-m3"
+      }
+    }
+  }
+}

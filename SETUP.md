@@ -165,7 +165,14 @@ Claude Code는 **프로젝트 루트의 `.mcp.json`을 자동 인식**합니다(
 같은 `mcpServers` 구조를 쓰되, `command`는 의존성이 설치된 Python을 가리킵니다(예: 이
 저장소의 `.venv`). `.mcp.json`은 절대 경로를 포함하므로 커밋하지 않습니다(`.gitignore`).
 
-`<REPO>`를 실제 경로로 바꾼 `.mcp.json` 예시:
+저장소에 포함된 [`.mcp.json.example`](.mcp.json.example)을 복사해 쓰는 것이 가장 빠릅니다:
+
+```bash
+cp .mcp.json.example .mcp.json
+# .mcp.json 을 열어 <REPO> 4곳을 이 기기의 저장소 절대경로로 치환
+```
+
+복사본(`<REPO>`를 실제 경로로 바꾼 `.mcp.json`)은 다음과 같습니다:
 
 ```json
 {
@@ -199,8 +206,8 @@ claude mcp add llm-vault \
 
 ### 다중 기기 설정 (clone 후 매 기기 1회)
 
-vault(마크다운)는 git으로 동기화하되, **파생물은 기기마다 새로 만듭니다**(아래는
-모두 `.gitignore` 대상). 새 기기에서:
+**동기화는 git 하나로 단일화합니다.** vault(마크다운)는 git으로 옮기고, **파생물은
+기기마다 새로 만듭니다**(아래는 모두 `.gitignore` 대상). 새 기기에서:
 
 ```bash
 git clone <repo-url> && cd llm-vault
@@ -208,12 +215,18 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 # (선택) 더 견고한 YAML 파싱: .venv/bin/pip install pyyaml
 brew install ollama && brew services start ollama && ollama pull bge-m3   # macOS
 .venv/bin/python 90_Engine/indexer.py --vault . --db 90_Engine/ltm_cache.db --embed --force --report
-# 이 기기용 .mcp.json 작성(위 예시) 후 Claude Code 재시작
+cp .mcp.json.example .mcp.json   # <REPO> 를 이 기기 경로로 치환 후 Claude Code 재시작
 ```
 
 `ltm_cache.db`(임베딩 포함)·`.venv`·`.mcp.json`은 동기화하지 않습니다. node_id 등
 그래프 정체성은 마크다운 frontmatter에 들어 있어 git으로 함께 옮겨지므로, 각 기기에서
 인덱싱만 다시 하면 동일한 그래프가 재생성됩니다.
+
+> ⚠️ **git 위에 다른 파일 동기화 도구를 겹치지 마세요.** vault 폴더를 Obsidian Sync,
+> iCloud, Dropbox, OneDrive 등으로 동시에 동기화하면 `.git` 내부와 DuckDB 캐시
+> (`*.db`/`*.db.wal`)가 두 동기화 주체 사이에서 손상·충돌됩니다. 기기 간 이동은 항상
+> `git pull` / `git push` 로만 하고, 작업 전후로 커밋·동기화하는 습관을 들이세요.
+> (충돌 방지를 위해 DB는 절대 추적하지 않으며, 각 기기에서 재인덱싱으로 만듭니다.)
 
 ## 5. 연결 확인
 

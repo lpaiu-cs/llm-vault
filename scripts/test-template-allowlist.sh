@@ -51,6 +51,9 @@ check "examples/mini-vault/README.md"                  allow
 check "examples/mini-vault/eval_queries.json"          allow
 check "README.md"                                      allow
 check "scripts/sync-template.sh"                       allow
+check ".mcp.json.example"                              allow
+# 머신별 실제 배선(절대경로 포함)은 절대 공개 안 됨 (gitignore + allowlist 미등록)
+check ".mcp.json"                                      block
 
 echo ""
 echo "passed=$pass failed=$fail"
