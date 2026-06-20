@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  llm-vault 자동 동기화용 macOS LaunchAgent 템플릿.
+
+  설치(기기마다 1회):
+    1) 이 파일을 복사하고 <REPO>/<HOME> 을 이 기기의 절대경로로 치환한다.
+       - <REPO> : 저장소 루트 (예: /Users/me/vault)
+       - <HOME> : 홈 디렉터리 (예: /Users/me)
+       - PATH 의 /opt/homebrew/bin 은 Apple Silicon 기준. Intel 맥은 /usr/local/bin.
+       - Label 의 com.example 는 원하는 식별자로 바꿔도 된다(고유하면 됨).
+    2) ~/Library/LaunchAgents/ 에 .plist 확장자로 저장:
+         cp scripts/launchd/com.llm-vault-sync.plist.example \
+            ~/Library/LaunchAgents/com.example.llm-vault-sync.plist
+         # 편집기로 열어 <REPO>/<HOME> 치환
+    3) 로드:
+         launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.llm-vault-sync.plist
+         launchctl list | grep llm-vault         # 등록 확인
+    4) 로그: tail -f <HOME>/Library/Logs/llm-vault-sync.log
+    제거: launchctl bootout gui/$(id -u)/com.example.llm-vault-sync
+
+  동작: 15분(StartInterval)마다 + 로그인 시(RunAtLoad) scripts/sync.sh 실행.
+        sync.sh 는 origin(private)에만 push한다. 공개 템플릿(upstream)에는 절대
+        보내지 않는다(공개 반영은 scripts/sync-template.sh 로만).
+  주의: 첫 실행은 그 시점의 미커밋 변경을 전부 자동 커밋한다(클라우드 동기화 취지).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.llm-vault-sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string><REPO>/scripts/sync.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string><REPO></string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string><HOME></string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StartInterval</key>
+    <integer>900</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string><HOME>/Library/Logs/llm-vault-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string><HOME>/Library/Logs/llm-vault-sync.log</string>
+</dict>
+</plist>

@@ -228,6 +228,40 @@ cp .mcp.json.example .mcp.json   # <REPO> 를 이 기기 경로로 치환 후 Cl
 > `git pull` / `git push` 로만 하고, 작업 전후로 커밋·동기화하는 습관을 들이세요.
 > (충돌 방지를 위해 DB는 절대 추적하지 않으며, 각 기기에서 재인덱싱으로 만듭니다.)
 
+### 자동 동기화 (선택)
+
+매번 `git add/commit/push`를 직접 치기 번거롭고, 사실상 "개인 클라우드"로만 쓴다면
+[`scripts/sync.sh`](scripts/sync.sh)가 **자동 커밋(타임스탬프+호스트명) → pull --rebase →
+push**를 한 번에 처리합니다. 커밋 메시지를 매번 쓸 필요가 없습니다.
+
+```bash
+scripts/sync.sh            # 자동 메시지로 동기화
+scripts/sync.sh "메모"      # 메시지를 직접 주고 싶을 때
+```
+
+- **origin(private)에만 push합니다.** 공개 템플릿(upstream)에는 절대 보내지 않습니다
+  (공개 반영은 항상 [`scripts/sync-template.sh`](scripts/sync-template.sh)로만).
+- 커밋 로그가 `sync: ...`로 길어지지만, private는 "동기화 저널"이라 무방합니다. 공개
+  템플릿 히스토리는 `sync-template.sh`로 큐레이션되어 깨끗하게 유지됩니다.
+- rebase 충돌은 자동 해결하지 않고 멈춥니다(데이터 안전 우선) — 안내대로 수동 처리.
+
+**완전 자동(macOS launchd).** 손 안 대고 일정 간격으로 돌리려면 LaunchAgent 템플릿
+[`scripts/launchd/com.llm-vault-sync.plist.example`](scripts/launchd/com.llm-vault-sync.plist.example)을
+복사·치환해 설치합니다(헤더의 설치 절차 참조). 기본 15분 간격 + 로그인 시 실행이며,
+Obsidian이 꺼져 있어도(=Claude Code/MCP로만 작업해도) 동기화됩니다.
+
+```bash
+cp scripts/launchd/com.llm-vault-sync.plist.example \
+   ~/Library/LaunchAgents/com.example.llm-vault-sync.plist
+# 편집기로 열어 <REPO>/<HOME> 치환 후:
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.llm-vault-sync.plist
+launchctl list | grep llm-vault        # 등록 확인
+tail -f ~/Library/Logs/llm-vault-sync.log
+```
+
+> ⚠️ 자동 실행을 켜면 **첫 실행이 그 시점의 미커밋 변경을 전부 자동 커밋**합니다(클라우드
+> 동기화 취지상 의도된 동작). 진행 중인 작업을 따로 정리하고 싶다면 켜기 전에 정리하세요.
+
 ## 5. 연결 확인
 
 MCP 클라이언트를 완전히 재시작한 뒤 다음 중 하나를 요청합니다.
