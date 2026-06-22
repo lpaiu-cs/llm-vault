@@ -3,6 +3,7 @@
     {
       "query": "How should uncertain agent memory be handled?",
       "expected": [
+        "Agent Memory Retrieval Weighting",
         "Agent Memory",
         "Human Review Queue",
         "2026-06-01-route-uncertain-memory-to-review-queue",

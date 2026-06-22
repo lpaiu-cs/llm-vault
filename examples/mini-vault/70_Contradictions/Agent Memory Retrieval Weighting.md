@@ -38,7 +38,7 @@ inspect it during design, debugging, or review.
 
 - `[[Agent Memory Retrieval Weighting]] utilizes [[Needs Human Review]]` — unresolved retrieval tradeoffs should remain visible in the review surface.
 - `[[Agent Memory Retrieval Weighting]] utilizes [[2026-06-01-route-uncertain-memory-to-review-queue]]` — the current handling follows the demo decision for uncertain memory.
-- `[[Agent Memory Retrieval Weighting]] contradicts [[Agent Memory]]` — the weighting conflict qualifies the normal durable-memory retrieval path.
+- `[[Agent Memory Retrieval Weighting]] extends [[Agent Memory]]` — the weighting conflict qualifies the normal durable-memory retrieval path.
 
 ## Sources
 
