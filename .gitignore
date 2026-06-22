@@ -88,6 +88,7 @@ claude_desktop_config.local.json
 .cursor/
 .mcp.json
 .claude/
+.codex/
 
 # ─────────────────────────────────────────────────────────
 # 로컬 임시 작업
