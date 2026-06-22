@@ -11,6 +11,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
 
+Read this first: [English](#what-is-this) · [한국어 안내](#korean-overview)
+
 ## What is this?
 
 `llm-vault` combines an Obsidian-compatible Markdown vault, source-grounded
@@ -103,6 +105,7 @@ See [SETUP.md](SETUP.md) for MCP client setup and the private/public split. See
 - Antigravity 전용 연결 가이드: [docs/ANTIGRAVITY.md](docs/ANTIGRAVITY.md)
 - 왜 이 구조가 필요한지: [docs/WHY_LLM_VAULT.md](docs/WHY_LLM_VAULT.md)
 - 작은 데모 vault: [examples/mini-vault](examples/mini-vault)
+- 기기 간 git 동기화와 선택적 자동 sync: [SETUP.md](SETUP.md#자동-동기화-선택)
 
 최소 흐름은 다음과 같습니다.
 
