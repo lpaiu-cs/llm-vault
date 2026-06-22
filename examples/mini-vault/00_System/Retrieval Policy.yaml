@@ -1,0 +1,28 @@
+# Mini-vault retrieval policy.
+#
+# This fixture is intentionally tiny and often runs without embeddings. To keep
+# the safety-path demo observable in BM25-only mode, review/meta layers remain
+# excluded by default but receive stronger rank weights when the caller opts in
+# with --include-reviews.
+
+version: 1
+
+layers:
+  70_Contradictions:
+    default_include: false
+    weight: 2.5
+    annotation: contradiction / unresolved
+  80_Reviews:
+    default_include: false
+    weight: 1.5
+    annotation: low-confidence / possible hallucination
+
+files:
+  70_Contradictions/Agent Memory Retrieval Weighting.md:
+    default_include: false
+    weight: 4.0
+    annotation: contradiction / unresolved
+  80_Reviews/Needs Human Review.md:
+    default_include: false
+    weight: 2.0
+    annotation: low-confidence / possible hallucination

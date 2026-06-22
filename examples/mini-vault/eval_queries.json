@@ -1,8 +1,51 @@
 {
   "queries": [
-    {"query": "왜 LLM은 strawberry의 r 개수를 못 세나?", "expected": ["Byte Pair Encoding", "Tokenizer"]},
-    {"query": "토큰화는 어떻게 동작하나?", "expected": ["Tokenizer", "Byte Pair Encoding"]},
-    {"query": "트랜스포머 아키텍처의 핵심은 무엇인가?", "expected": ["Transformer"]},
-    {"query": "예시 프로젝트는 무엇을 사용하나?", "expected": ["Example Project", "Transformer"]}
+    {
+      "query": "How should uncertain agent memory be handled?",
+      "expected": [
+        "Agent Memory",
+        "Human Review Queue",
+        "2026-06-01-route-uncertain-memory-to-review-queue",
+        "Needs Human Review"
+      ],
+      "include_reviews": true
+    },
+    {
+      "query": "Why should raw sources not be edited after ingest?",
+      "expected": [
+        "Source Summary - Agent Memory Session"
+      ]
+    },
+    {
+      "query": "When should unresolved contradictions be included in retrieval?",
+      "expected": [
+        "Agent Memory Retrieval Weighting",
+        "Needs Human Review"
+      ],
+      "include_reviews": true
+    },
+    {
+      "query": "Which decision routes uncertain memory to review instead of durable knowledge?",
+      "expected": [
+        "2026-06-01-route-uncertain-memory-to-review-queue",
+        "Human Review Queue"
+      ]
+    },
+    {
+      "query": "왜 LLM은 strawberry의 r 개수를 못 세나?",
+      "expected": ["Byte Pair Encoding", "Tokenizer"]
+    },
+    {
+      "query": "토큰화는 어떻게 동작하나?",
+      "expected": ["Tokenizer", "Byte Pair Encoding"]
+    },
+    {
+      "query": "트랜스포머 아키텍처의 핵심은 무엇인가?",
+      "expected": ["Transformer"]
+    },
+    {
+      "query": "예시 프로젝트는 무엇을 사용하나?",
+      "expected": ["Example Project", "Transformer"]
+    }
   ]
 }

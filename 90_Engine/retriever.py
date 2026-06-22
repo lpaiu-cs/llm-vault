@@ -497,7 +497,9 @@ def hybrid_seed_search(query, conn, nodes, top_k=5,
         tokenized = [tokenize_korean_english(d) for d in corpus]
         bm25 = BM25Okapi(tokenized)
         scores = bm25.get_scores(tokenize_korean_english(query))
-        bm25_ranking = [node_ids[i] for i in sorted(range(len(scores)),
+        positive = [i for i, score in enumerate(scores) if score > 0]
+        ranked_idx = positive if positive else range(len(scores))
+        bm25_ranking = [node_ids[i] for i in sorted(ranked_idx,
                                                       key=lambda i: -scores[i])]
         rankings.append(bm25_ranking)
         used_modes.append("bm25")

@@ -3,7 +3,7 @@ title: Agent Memory
 type: Concept
 status: evergreen
 confidence: medium
-aliases: [agent-maintained memory]
+aliases: [agent-maintained memory, uncertain agent memory, handled agent memory]
 ---
 
 # Agent Memory
@@ -19,6 +19,8 @@ confident note.
 - Promote only durable claims into concept notes.
 - Route uncertain or unreviewed claims to a review queue.
 - Keep decision history append-only when a decision changes.
+- When uncertain agent memory must be handled, preserve the uncertainty instead
+  of overwriting it with a confident summary.
 
 ## Core Edges
 
