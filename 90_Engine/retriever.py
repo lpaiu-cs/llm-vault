@@ -27,7 +27,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from contextlib import closing
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 try:
     import duckdb
@@ -769,6 +769,37 @@ class Retriever:
             "policy_source": self.policy_source or "built-in fallback",
         }
         return output
+
+
+# ─────────────────────────────────────────────────────────────
+# §7.5 그래프 통계 (mcp_server·vault_daemon 공용 — 인메모리 그래프에서 도출)
+# ─────────────────────────────────────────────────────────────
+def compute_vault_stats(retriever, embed_model):
+    """Retriever의 인메모리 그래프에서 vault 통계를 도출(단일 출처).
+    mcp_server.vault_stats와 vault_daemon /vault_stats가 공유해 공식 드리프트를 막는다."""
+    nodes, edges = retriever.nodes, retriever.edges
+
+    def _title(nid):
+        n = nodes.get(str(nid))
+        return n["title"] if n else str(nid)
+
+    pred = Counter(e["predicate"] for e in edges)
+    in_deg = Counter(_title(e["target_id"]) for e in edges)
+    out_deg = Counter(_title(e["source_id"]) for e in edges)
+
+    def _top5(c):
+        return {t: d for t, d in sorted(c.items(), key=lambda kv: (-kv[1], kv[0]))[:5]}
+
+    n_emb = sum(1 for n in nodes.values() if n["has_embedding"])
+    return {
+        "nodes_total": len(nodes),
+        "edges_total": len(edges),
+        "embedding_coverage": f"{n_emb}/{len(nodes)}",
+        "embedding_model": embed_model,
+        "predicate_distribution": dict(pred.most_common()),
+        "hub_top5_in_degree": _top5(in_deg),
+        "authority_top5_out_degree": _top5(out_deg),
+    }
 
 
 # ─────────────────────────────────────────────────────────────
