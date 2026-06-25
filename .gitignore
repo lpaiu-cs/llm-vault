@@ -8,6 +8,9 @@
 ltm_cache.db*
 examples/mini-vault/fixture.db*
 
+# 데몬 디버그 spawn 로그 (DAEMON_DEBUG=1일 때만 생성; 동기화 대상 아님)
+90_Engine/daemon.spawn.log
+
 # ─────────────────────────────────────────────────────────
 # Python
 # ─────────────────────────────────────────────────────────
