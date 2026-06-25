@@ -77,6 +77,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 import retriever as retriever_mod
 import indexer as indexer_mod
+import daemon_client
 
 
 # ─────────────────────────────────────────────────────────────
@@ -86,6 +87,25 @@ VAULT_ROOT = os.environ.get("VAULT_ROOT", str(SCRIPT_DIR.parent))
 VAULT_DB = os.environ.get("VAULT_DB", str(SCRIPT_DIR / "ltm_cache.db"))
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "bge-m3")
+
+# M1: 읽기는 단일 소유자 데몬으로 포워딩(USE_DAEMON). 데몬 미사용/불가 시 직접 단명 연결로 폴백.
+USE_DAEMON = os.environ.get("USE_DAEMON", "").lower() in ("1", "true", "on", "yes")
+
+
+def _daemon_call(method: str, path: str, payload: dict = None):
+    """USE_DAEMON이면 데몬으로 포워딩하고 (True, 결과). 미사용/불가/실패면 (False, None)
+    → 호출부가 현 in-process 경로로 폴백한다(데몬-다운 read 복원력)."""
+    if not USE_DAEMON:
+        return False, None
+    try:
+        port = daemon_client.ensure_daemon(VAULT_DB, SCRIPT_DIR)
+        if not port:
+            return False, None
+        if method == "GET":
+            return True, daemon_client.get(port, path)
+        return True, daemon_client.post(port, path, payload or {})
+    except Exception:
+        return False, None
 
 # 링크/편집 네임스페이스 제외 목록. list_notes()와 _find_note_path()가 사용한다.
 # 05_Inbox/06_Raw는 wikilink/edge 타깃이 아니라 source_path로만 참조되므로 여기서 제외.
@@ -449,6 +469,14 @@ def retrieve_knowledge(query: str, top_k: int = 5, max_hops: int = 2,
 
     참고: 호출 시 debounce 조건이 맞으면 그동안의 변경을 자동으로 1회 정합한다.
     """
+    ok, res = _daemon_call("POST", "/retrieve", {
+        "query": query, "top_k": top_k, "max_hops": max_hops, "max_nodes": max_nodes,
+        "include_raw": include_raw, "include_reviews": include_reviews,
+        "confidence_weighting": confidence_weighting,
+    })
+    if ok:
+        return res
+    # 직접 폴백(데몬 미사용/불가): 현 in-process 경로
     _maybe_auto_reconcile()
     r = get_retriever()
     return r.retrieve(query, top_k=top_k, max_hops=max_hops, max_nodes=max_nodes,
@@ -478,7 +506,10 @@ def sync_vault(force: bool = False, embed: bool = True) -> dict:
 def vault_stats() -> dict:
     """현재 Vault 그래프 통계: node/엣지 수, 임베딩 커버리지, 술어 분포,
     Hub Top 5(in-degree), Authority Top 5(out-degree)."""
-    # 단일 출처(인메모리 그래프)에서 모두 도출 — 동시 write swap과의 불일치 방지 + DB 왕복 제거
+    ok, res = _daemon_call("GET", "/vault_stats")
+    if ok:
+        return res
+    # 직접 폴백(데몬 미사용/불가): 단일 출처(인메모리 그래프)에서 도출
     r = get_retriever()
 
     def _title(nid):
