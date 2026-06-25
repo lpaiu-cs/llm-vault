@@ -386,21 +386,22 @@ def vault_stats() -> dict:
     """현재 Vault 그래프 통계: node/엣지 수, 임베딩 커버리지, 술어 분포,
     Hub Top 5(in-degree), Authority Top 5(out-degree)."""
     r = get_retriever()
-    conn = r.conn
-    pred_rows = conn.execute("""
-        SELECT predicate, COUNT(*) AS cnt FROM edges
-        GROUP BY predicate ORDER BY cnt DESC
-    """).fetchall()
-    hub_rows = conn.execute("""
-        SELECT n.title, COUNT(e.edge_id) AS deg FROM nodes n
-        LEFT JOIN edges e ON e.target_id = n.node_id
-        GROUP BY n.title ORDER BY deg DESC, n.title LIMIT 5
-    """).fetchall()
-    auth_rows = conn.execute("""
-        SELECT n.title, COUNT(e.edge_id) AS deg FROM nodes n
-        LEFT JOIN edges e ON e.source_id = n.node_id
-        GROUP BY n.title ORDER BY deg DESC, n.title LIMIT 5
-    """).fetchall()
+    with contextlib.closing(
+            retriever_mod.connect_db(VAULT_DB, read_only=True)) as conn:
+        pred_rows = conn.execute("""
+            SELECT predicate, COUNT(*) AS cnt FROM edges
+            GROUP BY predicate ORDER BY cnt DESC
+        """).fetchall()
+        hub_rows = conn.execute("""
+            SELECT n.title, COUNT(e.edge_id) AS deg FROM nodes n
+            LEFT JOIN edges e ON e.target_id = n.node_id
+            GROUP BY n.title ORDER BY deg DESC, n.title LIMIT 5
+        """).fetchall()
+        auth_rows = conn.execute("""
+            SELECT n.title, COUNT(e.edge_id) AS deg FROM nodes n
+            LEFT JOIN edges e ON e.source_id = n.node_id
+            GROUP BY n.title ORDER BY deg DESC, n.title LIMIT 5
+        """).fetchall()
     n_emb = sum(1 for n in r.nodes.values() if n["has_embedding"])
     return {
         "nodes_total": len(r.nodes),
@@ -772,26 +773,27 @@ def delete_node(title: str) -> dict:
     """
     t = _validate_title(title)
     path = _find_note_path(t)
-    r = get_retriever()
-    conn = r.conn  # retriever는 read_only=False로 연결됨 → DELETE 가능
+    get_retriever()  # DB 존재 확인(없으면 친절한 에러) + 인메모리 그래프 준비
 
     node_id = None
-    for nid, fp, ntitle in conn.execute(
-            "SELECT node_id, file_path, title FROM nodes").fetchall():
-        if ntitle == t or Path(fp).stem == t:
-            node_id = nid
-            break
+    with contextlib.closing(
+            retriever_mod.connect_db(VAULT_DB, read_only=False)) as conn:
+        for nid, fp, ntitle in conn.execute(
+                "SELECT node_id, file_path, title FROM nodes").fetchall():
+            if ntitle == t or Path(fp).stem == t:
+                node_id = nid
+                break
 
-    edges_removed, node_removed = 0, False
-    if node_id is not None:
-        edges_removed = conn.execute(
-            "SELECT COUNT(*) FROM edges WHERE source_id = ? OR target_id = ?",
-            [node_id, node_id]).fetchone()[0]
-        conn.execute("DELETE FROM edges WHERE source_id = ? OR target_id = ?",
-                     [node_id, node_id])
-        conn.execute("DELETE FROM nodes WHERE node_id = ?", [node_id])
-        conn.commit()
-        node_removed = True
+        edges_removed, node_removed = 0, False
+        if node_id is not None:
+            edges_removed = conn.execute(
+                "SELECT COUNT(*) FROM edges WHERE source_id = ? OR target_id = ?",
+                [node_id, node_id]).fetchone()[0]
+            conn.execute("DELETE FROM edges WHERE source_id = ? OR target_id = ?",
+                         [node_id, node_id])
+            conn.execute("DELETE FROM nodes WHERE node_id = ?", [node_id])
+            conn.commit()
+            node_removed = True
 
     file_removed = False
     if path is not None and path.exists():

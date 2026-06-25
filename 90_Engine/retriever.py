@@ -20,11 +20,13 @@ import re
 import sys
 import json
 import uuid
+import time
 import argparse
 import json as _json
 import urllib.request
 import urllib.error
 from pathlib import Path
+from contextlib import closing
 from collections import defaultdict
 
 try:
@@ -372,10 +374,33 @@ def normalize_vector(vec):
 # ─────────────────────────────────────────────────────────────
 # §3. 데이터 로더
 # ─────────────────────────────────────────────────────────────
+def connect_db(db_path, read_only=True, retries=20, delay=0.25):
+    """DuckDB 연결을 '짧게 잡고 바로 닫는' 용도로 연다. 락 충돌 시 잠깐 재시도.
+
+    여러 MCP 클라이언트(Claude/Codex/Antigravity)가 같은 ltm_cache.db에 동시에
+    붙는 환경에서, read-write 연결을 프로세스 수명 내내 들고 있으면 DuckDB의
+    single-writer 락 때문에 다른 클라이언트가 'Conflicting lock'으로 막힌다.
+    그래서 reader는 read_only=True(공유 락, 다중 프로세스 동시 가능)로, writer는
+    단명 read_only=False로만 열고 즉시 닫는다.
+    """
+    last = None
+    for _ in range(retries):
+        try:
+            return duckdb.connect(db_path, read_only=read_only)
+        except Exception as e:  # duckdb.IOException 등: 락 충돌이면 잠깐 대기 후 재시도
+            if "lock" not in str(e).lower():
+                raise
+            last = e
+            time.sleep(delay)
+    raise last
+
+
 def load_vault_graph(db_path, vault_root=None):
     """DuckDB에서 노드/엣지 전체 로드 + 본문 텍스트 + 캐시된 임베딩.
-    vault_root를 주면 노드에 rel_path(파일 단위 정책용)를 함께 채운다."""
-    conn = duckdb.connect(db_path, read_only=False)
+    vault_root를 주면 노드에 rel_path(파일 단위 정책용)를 함께 채운다.
+
+    그래프는 메모리에 적재한 뒤 연결을 즉시 닫는다(영속 락 보유 금지)."""
+    conn = connect_db(db_path, read_only=True)
     vr = Path(vault_root).resolve() if vault_root else None
 
     nodes = {}
@@ -428,7 +453,8 @@ def load_vault_graph(db_path, vault_root=None):
             "evidence": ev,
         })
 
-    return conn, nodes, edges
+    conn.close()
+    return nodes, edges
 
 
 # ─────────────────────────────────────────────────────────────
@@ -666,7 +692,7 @@ class Retriever:
                            else Path(db_path).resolve().parent.parent)
         self.policy, self.policy_source = load_retrieval_policy(
             self.vault_root, explicit_path=policy_path)
-        self.conn, self.nodes, self.edges = load_vault_graph(db_path, self.vault_root)
+        self.nodes, self.edges = load_vault_graph(db_path, self.vault_root)
         n_with_emb = sum(1 for n in self.nodes.values() if n["has_embedding"])
         print(f"[*] Loaded {len(self.nodes)} nodes, {len(self.edges)} edges "
               f"({n_with_emb} with embedding)", file=sys.stderr)
@@ -717,11 +743,12 @@ class Retriever:
             nid: node_annotation(n, pol) for nid, n in self.nodes.items()
         }
 
-        seed_ids, mode = hybrid_seed_search(
-            query, self.conn, self.nodes, top_k=top_k,
-            ollama_url=self.ollama_url, embed_model=self.embed_model,
-            allowed_ids=allowed_ids, weights=weights,
-        )
+        with closing(connect_db(self.db_path, read_only=True)) as conn:
+            seed_ids, mode = hybrid_seed_search(
+                query, conn, self.nodes, top_k=top_k,
+                ollama_url=self.ollama_url, embed_model=self.embed_model,
+                allowed_ids=allowed_ids, weights=weights,
+            )
         ranked_ids, node_scores, activated = adaptive_hop_expansion(
             seed_ids, self.edges, max_hops=max_hops, threshold=threshold,
             weights=weights,
