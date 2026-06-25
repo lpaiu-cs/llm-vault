@@ -1,6 +1,9 @@
-# llm-vault Engine — Daemon Architecture (구현 계획서, draft)
+# llm-vault Engine — Daemon Architecture (구현 완료: M1–M3)
 
-> 상태: **결정 확정(§11), 구현 착수 가능**. 결정 사항은 §11에 모아둔다.
+> 상태: **구현 완료 · main 반영**. M1(read 포워딩)·M2(write 소유)·M3(이벤트 구동 git sync)이
+> 머지됐고, Windows venv-인터프리터 spawn 버그가 후속 수정됨
+> ([handoff/DAEMON_SPAWN_FIX.md](../handoff/DAEMON_SPAWN_FIX.md)). 기본은 in-process이며
+> 데몬은 `USE_DAEMON=1`로 opt-in한다(사용자 설정: SETUP.md '데몬 모드' 절). 결정 사항은 §11.
 > 관련: [[2026-06-25-llm-vault-engine-concurrency-snapshot-writes]],
 > [[2026-06-21-cross-device-sync-via-git]].
 

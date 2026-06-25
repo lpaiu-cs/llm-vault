@@ -40,7 +40,7 @@ Python 3.9+가 필요합니다. 레포 루트에서 실행합니다.
 pip install -r requirements.txt
 ```
 
-`requirements.txt`에는 MCP 서버와 선택적 FastAPI retriever 모드에 필요한 Python 패키지가 포함되어 있습니다.
+`requirements.txt`에는 MCP 서버 + (선택)데몬 모드에 필요한 Python 패키지가 포함되어 있습니다. 데몬 모드의 추가 패키지(fastapi/uvicorn/pydantic)는 `USE_DAEMON=1`일 때만 필요하며, 활성화·검증은 아래 [데몬 모드](#데몬-모드) 절을 보세요.
 
 ## 2. Ollama 준비
 
@@ -420,7 +420,93 @@ scripts/sync-template.sh --dry-run 174e250
 scripts/sync-template.sh 174e250
 ```
 
+## 데몬 모드
+
+> 선택 · 다중 클라이언트 동시성 (Windows 포함). 기본은 in-process이며 `USE_DAEMON=1`로 opt-in.
+
+기본 동작은 **in-process**입니다 — 각 MCP 클라이언트가 자기 프로세스에서 DuckDB 캐시를
+단명 연결로 읽고, 쓰기는 immutable snapshot + 원자 교체(POSIX)로 처리합니다. 한 기기에서
+**여러 MCP 클라이언트(예: Claude Code + Codex + Antigravity)가 같은 vault를 동시에** 쓰면
+DuckDB의 "한 번에 한 read-write 프로세스" 제약으로 락 경합이 생길 수 있고, 스냅샷 원자
+교체는 Windows에서 성립하지 않습니다.
+
+**데몬 모드**는 이를 구조적으로 해결합니다: 기기마다 **단일 소유자 데몬**(`vault_daemon.py`)
+하나가 DuckDB를 독점하고, 각 클라이언트의 `mcp_server.py`는 **localhost HTTP 프록시**로
+포워딩합니다. 다중 프로세스 파일 경합이 사라지고 Win/mac/Linux가 동일하게 동작합니다.
+설계 전모는 [docs/DAEMON_DESIGN.md](docs/DAEMON_DESIGN.md)를 보세요.
+
+### 1) 의존성
+
+데몬 모드는 추가 패키지가 필요합니다(이미 `requirements.txt`에 포함):
+
+```bash
+pip install -r requirements.txt   # fastapi / uvicorn[standard] / pydantic 포함
+```
+
+> ⚠️ **Windows: 반드시 이 저장소 venv 인터프리터에 설치**하세요
+> (`.venv\Scripts\python.exe -m pip install -r requirements.txt`). 데몬은 **venv 인터프리터로
+> 떠야 합니다**(의존성이 venv에만 있으므로). 프록시가 venv 인터프리터를 자동 도출하지만,
+> 패키지가 base 파이썬에만 있으면 데몬이 import에서 즉사하고 영구 in-process 폴백이 됩니다 —
+> 배경·진단은 [handoff/DAEMON_SPAWN_FIX.md](handoff/DAEMON_SPAWN_FIX.md).
+
+### 2) 켜기 — 클라이언트별 env 한 줄
+
+활성화는 MCP 설정에 **`USE_DAEMON=1`** env를 추가하는 것뿐입니다. 데몬은 **기기당 싱글턴**
+(vault DB 경로 기반 결정적 포트)이라, 같은 vault를 쓰는 모든 클라이언트가 **하나의 데몬을 공유**합니다.
+
+| 클라이언트 | 설정 파일 | 추가 |
+|---|---|---|
+| Claude Code | `~/.claude.json` (유저 스코프) 또는 프로젝트 `.mcp.json` | `"env": { "USE_DAEMON": "1" }` |
+| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.llm-vault.env]` 아래 `USE_DAEMON = "1"` |
+| Antigravity | `~/.gemini/config/mcp_config.json` | `"env": { "USE_DAEMON": "1" }` |
+
+> ⚠️ **혼합 모드 금지.** 같은 기기에서 일부 클라이언트만 켜면 "데몬 쓰기 ↔ in-process 쓰기"가
+> 같은 DB에 겹칠 수 있습니다. **그 기기의 모든 클라이언트에 균일하게** 넣고, 설정 변경 후
+> **모든 클라이언트를 재시작**하세요(MCP 설정은 기동 시 로드됩니다).
+
+데몬은 첫 vault 호출에서 **자동 기동**(detached)되고, 첫 요청에서 그래프를 적재합니다.
+
+### 3) 검증
+
+```bash
+pgrep -fl vault_daemon.py            # mac/Linux: 데몬 프로세스 확인
+# Windows: 작업관리자에서 python(vault_daemon.py) 확인, 또는 netstat -ano | findstr LISTENING
+```
+
+라이브 vault 호출 직후 `/health`의 `graph_loaded`가 `true`가 되고 `node_count`가 채워지면
+그 쿼리를 **데몬이** 처리한 것입니다. 프록시는 데몬에 닿지 못하면 조용히 in-process로
+폴백하되 **처음 1회 stderr로 경고**하므로, MCP 클라이언트 로그에서 폴백 여부를 알 수 있습니다.
+
+### 4) git 동기화는 그대로 둡니다
+
+데몬에도 git sync 기능(`SYNC_ENABLED`)이 있지만 **기본 off로 두세요.** 기존 15분 스케줄러
+(launchd / Task Scheduler — [자동 동기화](#자동-동기화-선택))가 sync를 계속 전담합니다. 둘 다
+켜면 같은 repo를 두 syncer가 push/pull해 충돌합니다 — sync는 **하나만** 맡아야 합니다.
+(데몬은 DB 단일 소유만 담당.)
+
+### 5) 진단 · 롤백
+
+- **데몬이 안 뜬다(계속 in-process 폴백):** `DAEMON_DEBUG=1`을 env에 추가하고 재시작하면
+  데몬 stdout/stderr가 `90_Engine/daemon.spawn.log`로 캡처됩니다(예: `ERROR: duckdb 미설치`
+  → venv가 아닌 인터프리터로 떴다는 신호).
+- **롤백(즉시):** MCP 설정에서 `USE_DAEMON` env 한 줄을 제거하고 재시작하면 in-process 기본
+  동작으로 되돌아갑니다(코드 변경 불필요).
+
 ## Troubleshooting
+
+### 데몬이 안 뜨고 계속 in-process로 폴백함 (`USE_DAEMON=1`인데)
+
+프록시 로그(stderr)에 `데몬에 닿지 못해 in-process로 폴백` 경고가 보이면, 데몬이 기동에
+실패한 것입니다. 가장 흔한 원인은 **venv가 아닌 파이썬으로 데몬이 떠서 `duckdb`/`fastapi`를
+못 찾는 것**(특히 Windows venv 런처가 base 파이썬으로 redirect되는 경우).
+
+```bash
+# 진단: DAEMON_DEBUG=1 을 env에 넣고 재시작 → spawn 로그 확인
+cat 90_Engine/daemon.spawn.log        # 'ERROR: duckdb 미설치' 등이 보임
+```
+
+해결: 이 저장소 **venv 인터프리터**에 `pip install -r requirements.txt`로 의존성을 설치하세요.
+근본 원인·수정 내역은 [handoff/DAEMON_SPAWN_FIX.md](handoff/DAEMON_SPAWN_FIX.md)에 있습니다.
 
 ### `ollama: command not found`
 

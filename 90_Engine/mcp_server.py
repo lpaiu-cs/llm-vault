@@ -93,6 +93,7 @@ USE_DAEMON = os.environ.get("USE_DAEMON", "").lower() in ("1", "true", "on", "ye
 
 _daemon_port_cache = None      # 최근 확인된 정상 데몬 포트(있으면 ensure/health 생략)
 _daemon_retry_after = 0.0      # 네거티브 캐시: 이 시각 전엔 ensure_daemon 재시도 안 함
+_daemon_fallback_warned = False  # 무음 폴백 1회 경고 플래그(데몬 정상 도달 시 재무장)
 
 
 def _daemon_env() -> dict:
@@ -120,21 +121,38 @@ def _get_daemon_port():
     return None
 
 
+def _warn_daemon_fallback(reason: str):
+    """USE_DAEMON인데 데몬에 닿지 못해 in-process로 폴백할 때 '처음 한 번' stderr로 알린다.
+    무음 폴백이 데몬 완전 실패(예: Windows venv-인터프리터 spawn 버그)를 가리지 않게 한다.
+    stdout이 아니라 stderr라 MCP(JSON-RPC) 프레이밍을 깨지 않는다. See handoff/DAEMON_SPAWN_FIX.md §6."""
+    global _daemon_fallback_warned
+    if not _daemon_fallback_warned:
+        _daemon_fallback_warned = True
+        print(f"[llm-vault] USE_DAEMON=1이지만 데몬에 닿지 못해 in-process로 폴백합니다 "
+              f"({reason}). 진단: DAEMON_DEBUG=1 후 90_Engine/daemon.spawn.log 확인.",
+              file=sys.stderr)
+
+
 def _daemon_call(method: str, path: str, payload: dict = None):
     """USE_DAEMON이면 데몬으로 포워딩하고 (True, 결과). 미사용/불가/실패면 (False, None)
     → 호출부가 현 in-process 경로로 폴백한다(데몬-다운 read 복원력)."""
-    global _daemon_port_cache
+    global _daemon_port_cache, _daemon_fallback_warned
     if not USE_DAEMON:
         return False, None
     port = _get_daemon_port()
     if not port:
+        _warn_daemon_fallback("데몬 기동/health 실패")
         return False, None
     try:
         if method == "GET":
-            return True, daemon_client.get(port, path)
-        return True, daemon_client.post(port, path, payload or {})
-    except Exception:
+            res = daemon_client.get(port, path)
+        else:
+            res = daemon_client.post(port, path, payload or {})
+        _daemon_fallback_warned = False  # 정상 도달 → 다음 outage 때 다시 경고하도록 재무장
+        return True, res
+    except Exception as e:
         _daemon_port_cache = None  # 호출 실패 → 캐시 무효화(다음 호출이 재확인/재기동)
+        _warn_daemon_fallback(f"데몬 호출 실패: {type(e).__name__}")
         return False, None
 
 # 링크/편집 네임스페이스 제외 목록. list_notes()와 _find_note_path()가 사용한다.

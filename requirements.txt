@@ -16,7 +16,10 @@ mcp>=1.0.0             # MCP 서버 (Cursor/Claude Desktop 연동)
 # pyyaml>=6.0          # 선택
 
 # ─────────────────────────────────────────────────────────
-# FastAPI 서버 모드 (선택; MCP만 쓸 거면 불필요)
+# 데몬 모드 (USE_DAEMON=1일 때 필수; 그 외엔 불필요)
+# 단일 소유자 데몬이 DuckDB를 독점하고, 여러 MCP 클라이언트가 localhost HTTP로 프록시
+# 포워딩한다(다중 클라이언트 동시성 + Windows 호환). in-process 기본 모드만 쓸 거면 미설치 가능.
+# See docs/DAEMON_DESIGN.md, SETUP.md '데몬 모드' 절.
 # ─────────────────────────────────────────────────────────
 fastapi>=0.110.0
 uvicorn[standard]>=0.27.0

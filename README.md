@@ -132,8 +132,9 @@ flowchart LR
     MCP --> CLI
 ```
 
-> 동시성·프로세스 토폴로지(여러 MCP 클라이언트의 동시 접근 처리)는 단일 소유자 데몬으로
-> 진화 중입니다 — 설계는 [docs/DAEMON_DESIGN.md](docs/DAEMON_DESIGN.md) 참고.
+> 동시성·프로세스 토폴로지(여러 MCP 클라이언트의 동시 접근 처리)는 **단일 소유자 데몬**으로
+> 해결됩니다(구현 완료, 기본 off · `USE_DAEMON=1` opt-in). 설계는
+> [docs/DAEMON_DESIGN.md](docs/DAEMON_DESIGN.md), 활성화·검증은 [SETUP.md](SETUP.md)의 '데몬 모드' 절.
 
 ## Getting Started
 
@@ -186,7 +187,10 @@ llm-vault/
 └── 90_Engine/                 # 런타임/인덱스/MCP
     ├── indexer.py
     ├── retriever.py
-    ├── mcp_server.py
+    ├── mcp_server.py          # MCP stdio 서버(데몬 모드면 프록시)
+    ├── vault_daemon.py        # 단일 소유자 데몬 (USE_DAEMON; FastAPI/localhost)
+    ├── daemon_client.py       # 데몬 디스커버리 + 경량 HTTP 클라이언트
+    ├── vault_sync.py          # 데몬 구동 git 동기화 헬퍼(이벤트 구동)
     └── ltm_cache.db           # local generated cache, ignored by git
 ```
 
