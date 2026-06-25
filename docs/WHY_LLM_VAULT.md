@@ -72,7 +72,7 @@ The MCP server exposes both read and write workflows:
 
 - `retrieve_knowledge` for hybrid BM25/dense/graph retrieval
 - `review_queue` for unresolved questions, contradictions, and review items
-- `create_note`, `update_note`, and edge tools for controlled memory writes
+- `create_node`, `update_node`, and edge tools for controlled memory writes
 - `sync_vault` and `reconcile_graph` for keeping Markdown and DuckDB aligned
 
 This lets an agent use the vault as a working memory substrate while still

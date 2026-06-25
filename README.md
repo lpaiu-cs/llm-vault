@@ -204,8 +204,8 @@ node는 사람이 직접 Markdown으로 작성해도 되고, MCP write 도구로
 인입(ingest)의 표준 절차는 [Ingest Policy](00_System/Ingest%20Policy.md)를 따릅니다.
 
 - 사람이 편집한 뒤에는 `sync_vault()` 또는 인덱서 실행으로 캐시를 갱신합니다.
-- 에이전트가 메모리를 저장할 때는 `list_notes()`로 기존 제목을 확인한 뒤
-  `create_note()`, `update_note()`, `upsert_edge()`를 사용합니다.
+- 에이전트가 메모리를 저장할 때는 `list_nodes()`로 기존 제목을 확인한 뒤
+  `create_node()`, `update_node()`, `upsert_edge()`를 사용합니다.
 - dangling edge가 생기면 자동 정합이 처리하거나 `reconcile_graph()`로 즉시 정리합니다.
 - **모든 source를 concept node로 만들지 않습니다.** 기본 도착지는
   `50_Source_Summaries/`이며, 내구성 지식만 `20_Concepts/`로 승격합니다.

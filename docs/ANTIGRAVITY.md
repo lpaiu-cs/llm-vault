@@ -100,7 +100,7 @@ Antigravity가 언제 vault를 조회해야 하는지 알려주려면 `~/.gemini
 - 사용자가 "내 기억", "내 기준", "이전에 정한 것", "내 node", "예전에 정리한 것"을 언급하거나 장기 지식이 필요한 질문을 하면 먼저 llm-vault MCP의 `retrieve_knowledge`를 호출한다.
 - 답변에 vault 내용을 사용한 경우, 그 정보가 vault에서 온 것임을 짧게 밝힌다.
 - vault에서 관련 정보를 찾지 못하면 추측하지 말고 "vault에서는 관련 기억을 찾지 못했다"고 말한다.
-- 사용자가 기억을 저장하라고 명시하면 `list_notes`로 기존 제목을 확인한 뒤 `create_note`, `update_note`, `upsert_edge` 중 맞는 도구를 사용한다.
+- 사용자가 기억을 저장하라고 명시하면 `list_nodes`로 기존 제목을 확인한 뒤 `create_node`, `update_node`, `upsert_edge` 중 맞는 도구를 사용한다.
 - 사람이 직접 vault 파일을 수정한 뒤에는 `sync_vault`를 호출해 인덱스를 갱신한다.
 - 중요한 검색을 바로 이어서 해야 하면 `reconcile_graph`로 그래프 정합을 먼저 맞춘다.
 ```

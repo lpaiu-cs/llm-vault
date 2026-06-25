@@ -13,7 +13,7 @@ Antigravity / Cursor / Claude Desktop
         ▼
 90_Engine/mcp_server.py
         ├─ read tools: retrieve_knowledge, sync_vault, vault_stats
-        ├─ write tools: list_notes, create_note, update_note, edge CRUD, reconcile_graph
+        ├─ write tools: list_nodes, create_node, update_node, edge CRUD, reconcile_graph
         │
         ├── retriever.py
         │     ├─ BM25
@@ -201,7 +201,7 @@ claude mcp add llm-vault -- <REPO>/.venv/bin/python <REPO>/90_Engine/mcp_server.
 ```
 
 등록 후 Claude Code를 재시작하면 `retrieve_knowledge`, `review_queue`, `vault_stats`,
-`create_note` 등이 노출됩니다. 상태는 `/mcp`로 확인합니다.
+`create_node` 등이 노출됩니다. 상태는 `/mcp`로 확인합니다.
 
 > ⚠️ **`.mcp.json`은 복사만으론 부족합니다.** `cp .mcp.json.example .mcp.json` 후
 > ① `<REPO>` 치환 ② `.venv` 실제 생성(venv+requirements) ③ `ltm_cache.db` 빌드(§3

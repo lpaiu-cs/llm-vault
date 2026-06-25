@@ -7,13 +7,13 @@ Karpathy LLM Framework - MCP Server (stdio transport) v2.2  [AI-managed LTM, inc
 AI가 그래프를 직접 관리할 수 있는 write 도구를 추가한 버전.
 
 추가된 write 도구:
-  - create_note(...)   : 새 메모리 node 생성 + 엣지 + 자동 임베딩
-  - update_note(...)   : 기존 node 본문/엣지 수정 (정체성 node_id 보존)
+  - create_node(...)   : 새 메모리 node 생성 + 엣지 + 자동 임베딩
+  - update_node(...)   : 기존 node 본문/엣지 수정 (정체성 node_id 보존)
   - upsert_edge(...)   : 기존 node에 엣지 1개 추가
   - remove_edge(...)   : 기존 node에서 엣지 1개 제거
   - delete_node(...)   : node 파일 + DB node/엣지 안전 삭제
   - reconcile_graph()  : 전체 엣지 재구성으로 dangling 일괄 해소(주기 실행 권장)
-  - list_notes()       : 전체 node 목록(링크 타깃 선택용)
+  - list_nodes()       : 전체 node 목록(링크 타깃 선택용)
 
 설계 원칙 (원본 아키텍처 준수):
   * 메모리는 마크다운 파일로 작성되고, indexer가 단일 게이트키퍼로
@@ -155,7 +155,7 @@ def _daemon_call(method: str, path: str, payload: dict = None):
         _warn_daemon_fallback(f"데몬 호출 실패: {type(e).__name__}")
         return False, None
 
-# 링크/편집 네임스페이스 제외 목록. list_notes()와 _find_note_path()가 사용한다.
+# 링크/편집 네임스페이스 제외 목록. list_nodes()와 _find_node_path()가 사용한다.
 # 05_Inbox/06_Raw는 wikilink/edge 타깃이 아니라 source_path로만 참조되므로 여기서 제외.
 # 주의: 이는 "검색 인덱싱" 제외와 다르다. indexer는 06_Raw를 full-text 전용으로
 # 인덱싱(검색 가능)하되 graph_node=False라 링크 타깃은 아니다. 즉 이 목록과
@@ -382,7 +382,7 @@ def _validate_title(title: str) -> str:
     return t
 
 
-def _find_note_path(title: str) -> Optional[Path]:
+def _find_node_path(title: str) -> Optional[Path]:
     """제목(=파일명 stem)으로 node 파일을 찾는다. 엔진/숨김 폴더는 제외."""
     root = _vault_root()
     for p in root.rglob(f"{title}.md"):
@@ -417,10 +417,10 @@ def _validate_edges(title: str, edges) -> list:
 def _dangling_warnings(edges) -> list:
     w = []
     for (pred, tgt, _desc) in edges:
-        if _find_note_path(tgt) is None:
+        if _find_node_path(tgt) is None:
             w.append(
                 f"target '{tgt}' node가 아직 없어 dangling 상태입니다. "
-                f"create_note로 만들면 다음 sync에서 자동 연결됩니다."
+                f"create_node로 만들면 다음 sync에서 자동 연결됩니다."
             )
     return w
 
@@ -432,7 +432,7 @@ def _edge_line(src: str, pred: str, tgt: str, desc: Optional[str] = None) -> str
     return line
 
 
-def _build_note_markdown(title, body, type_, moc, aliases, tags, edges, sources,
+def _build_node_markdown(title, body, type_, moc, aliases, tags, edges, sources,
                          node_id=None, id_=None, created=None, version="1.0") -> str:
     """indexer가 파싱 가능한 frontmatter + 9술어 엣지 섹션을 갖춘 node 생성.
 
@@ -507,7 +507,22 @@ def _norm(t: str) -> str:
 # ─────────────────────────────────────────────────────────────
 # MCP 서버 정의
 # ─────────────────────────────────────────────────────────────
-mcp = FastMCP("karpathy-vault-ltm")
+mcp = FastMCP(
+    "karpathy-vault-ltm",
+    instructions=(
+        "이 서버는 장기기억(LTM) 지식 그래프 vault입니다. Claude Code의 memory를 "
+        "쓰듯 능동적으로 활용하세요. vault의 문서 하나하나가 곧 memory node입니다.\n"
+        "- 지식·개념·과거 결정·출처에 관한 질문에 답하기 전에, 먼저 "
+        "retrieve_knowledge 로 vault를 조회해 관련 node/엣지를 확인합니다.\n"
+        "- 새로운 사실·결정·정의가 확정되면 create_node(필요 시 upsert_edge)로 "
+        "기록하고, 기존 node가 바뀌면 update_node 로 갱신합니다.\n"
+        "- vault 파일이 외부에서 변경되었을 수 있으면 sync_vault 로 동기화한 뒤 "
+        "조회합니다.\n"
+        "- 검증·정리가 필요하면 review_queue / reconcile_graph 로 상태를 점검합니다.\n"
+        "raw 원본(06_Raw)은 그래프 node가 아니라 검색 전용이며, 그래프 대리물은 "
+        "50_Source_Summaries 의 source-summary node입니다."
+    ),
+)
 
 
 # ===== 읽기 도구 (원본 유지) ===============================================
@@ -662,7 +677,7 @@ def review_queue(status: str = "open", layer: Optional[str] = None) -> dict:
 
 # ===== 쓰기 도구 (신규) ====================================================
 @mcp.tool()
-def list_notes() -> dict:
+def list_nodes() -> dict:
     """Vault의 모든 node 목록을 반환합니다. 엣지를 연결하기 전에 호출하여
     정확한 링크 타깃(=node 제목)을 확인하세요. dangling edge를 예방하는 핵심 도구.
 
@@ -689,7 +704,7 @@ def list_notes() -> dict:
 
 
 @mcp.tool()
-def create_note(title: str, body: str, type: str = "Concept",
+def create_node(title: str, body: str, type: str = "Concept",
                 moc: Optional[str] = None, aliases: Optional[list] = None,
                 tags: Optional[list] = None, edges: Optional[list] = None,
                 sources: Optional[list] = None, folder: str = "20_Concepts",
@@ -701,7 +716,7 @@ def create_note(title: str, body: str, type: str = "Concept",
       - 파일은 '{title}.md'로 저장되며 title이 곧 다른 node가 링크할 식별자입니다.
         제목은 명사형 단일 엔티티로, 파일명 금지문자를 쓰지 마세요.
       - edges의 각 target은 '이미 존재하거나 곧 만들 node의 정확한 제목'이어야 합니다.
-        먼저 list_notes()로 타깃 제목을 확인하면 dangling을 피할 수 있습니다.
+        먼저 list_nodes()로 타깃 제목을 확인하면 dangling을 피할 수 있습니다.
       - predicate는 9개만 허용: requires, utilizes, implemented_by, extends,
         abstracts, causes, contradicts, replaces, defines.
 
@@ -724,12 +739,12 @@ def create_note(title: str, body: str, type: str = "Concept",
          edges_inserted, edges_dangling, resolved_links, warnings}
     """
     title = _validate_title(title)
-    if _find_note_path(title) is not None:
+    if _find_node_path(title) is not None:
         raise ValueError(
-            f"이미 '{title}' node가 존재합니다. 수정하려면 update_note를 사용하세요."
+            f"이미 '{title}' node가 존재합니다. 수정하려면 update_node를 사용하세요."
         )
     norm_edges = _validate_edges(title, edges)
-    md = _build_note_markdown(
+    md = _build_node_markdown(
         title, body, type, moc, aliases or [], tags or [], norm_edges, sources or []
     )
     note_path = _vault_root() / folder / f"{title}.md"
@@ -763,7 +778,7 @@ def create_note(title: str, body: str, type: str = "Concept",
 
 
 @mcp.tool()
-def update_note(title: str, body: Optional[str] = None, edges: Optional[list] = None,
+def update_node(title: str, body: Optional[str] = None, edges: Optional[list] = None,
                 type: Optional[str] = None, moc: Optional[str] = None,
                 aliases: Optional[list] = None, tags: Optional[list] = None,
                 sources: Optional[list] = None, embed: bool = True,
@@ -781,9 +796,9 @@ def update_note(title: str, body: Optional[str] = None, edges: Optional[list] = 
         embed: True면 변경 후 재임베딩
     """
     title = _validate_title(title)
-    path = _find_note_path(title)
+    path = _find_node_path(title)
     if path is None:
-        raise ValueError(f"'{title}' node를 찾을 수 없습니다. 새로 만들려면 create_note를 쓰세요.")
+        raise ValueError(f"'{title}' node를 찾을 수 없습니다. 새로 만들려면 create_node를 쓰세요.")
     old = path.read_text(encoding="utf-8")
     meta = indexer_mod.parse_yaml_frontmatter(old)
 
@@ -826,7 +841,7 @@ def update_note(title: str, body: Optional[str] = None, edges: Optional[list] = 
     new_tags = tags if tags is not None else (meta.get("tags") or [])
     new_sources = sources if sources is not None else existing_sources
 
-    md = _build_note_markdown(
+    md = _build_node_markdown(
         title, new_body, new_type, new_moc, new_aliases, new_tags,
         new_edges, new_sources,
         node_id=meta.get("node_id"), id_=meta.get("id"), created=meta.get("created"),
@@ -875,9 +890,9 @@ def upsert_edge(source_title: str, predicate: str, target_title: str,
         raise ValueError("target_title이 비어 있습니다.")
     if tgt == src:
         raise ValueError("자기참조 edge는 금지입니다.")
-    path = _find_note_path(src)
+    path = _find_node_path(src)
     if path is None:
-        raise ValueError(f"source node '{src}'를 찾을 수 없습니다. 먼저 create_note로 만드세요.")
+        raise ValueError(f"source node '{src}'를 찾을 수 없습니다. 먼저 create_node로 만드세요.")
 
     text = path.read_text(encoding="utf-8")
     for e in indexer_mod.extract_edges_safely(text):
@@ -908,7 +923,7 @@ def remove_edge(source_title: str, predicate: str, target_title: str) -> dict:
     """
     src = _validate_title(source_title)
     tgt = (target_title or "").strip()
-    path = _find_note_path(src)
+    path = _find_node_path(src)
     if path is None:
         raise ValueError(f"source node '{src}'를 찾을 수 없습니다.")
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -944,7 +959,7 @@ def delete_node(title: str) -> dict:
         title: 삭제할 node 제목
     """
     t = _validate_title(title)
-    path = _find_note_path(t)
+    path = _find_node_path(t)
     if not Path(VAULT_DB).exists():
         raise RuntimeError(
             f"DuckDB 캐시가 없습니다: {VAULT_DB}\n"
