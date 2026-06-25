@@ -59,7 +59,6 @@ import contextlib
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from collections import Counter
 
 try:
     import fcntl  # POSIX 파일락 (writer 직렬화). Windows에선 O_EXCL 폴백.
@@ -92,19 +91,50 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "bge-m3")
 USE_DAEMON = os.environ.get("USE_DAEMON", "").lower() in ("1", "true", "on", "yes")
 
 
+_daemon_port_cache = None      # 최근 확인된 정상 데몬 포트(있으면 ensure/health 생략)
+_daemon_retry_after = 0.0      # 네거티브 캐시: 이 시각 전엔 ensure_daemon 재시도 안 함
+
+
+def _daemon_env() -> dict:
+    """스폰될 데몬이 프록시와 '동일한' vault/모델을 쓰도록 명시 env 전달
+    (호스트 env 타이밍/기본값 차이로 포트·DB가 갈리는 것 방지)."""
+    env = dict(os.environ)
+    env.update(VAULT_DB=VAULT_DB, VAULT_ROOT=VAULT_ROOT,
+               OLLAMA_URL=OLLAMA_URL, OLLAMA_MODEL=OLLAMA_MODEL)
+    return env
+
+
+def _get_daemon_port():
+    """정상 데몬 포트 또는 None. known-good는 캐시(매 호출 /health·spawn 생략),
+    기동 실패는 30초 네거티브 캐시(포트 충돌 시 매 호출 ~20s 스폰 폭주 방지)."""
+    global _daemon_port_cache, _daemon_retry_after
+    if _daemon_port_cache:
+        return _daemon_port_cache
+    if time.time() < _daemon_retry_after:
+        return None
+    port = daemon_client.ensure_daemon(VAULT_DB, SCRIPT_DIR, env=_daemon_env())
+    if port:
+        _daemon_port_cache = port
+        return port
+    _daemon_retry_after = time.time() + 30.0
+    return None
+
+
 def _daemon_call(method: str, path: str, payload: dict = None):
     """USE_DAEMON이면 데몬으로 포워딩하고 (True, 결과). 미사용/불가/실패면 (False, None)
     → 호출부가 현 in-process 경로로 폴백한다(데몬-다운 read 복원력)."""
+    global _daemon_port_cache
     if not USE_DAEMON:
         return False, None
+    port = _get_daemon_port()
+    if not port:
+        return False, None
     try:
-        port = daemon_client.ensure_daemon(VAULT_DB, SCRIPT_DIR)
-        if not port:
-            return False, None
         if method == "GET":
             return True, daemon_client.get(port, path)
         return True, daemon_client.post(port, path, payload or {})
     except Exception:
+        _daemon_port_cache = None  # 호출 실패 → 캐시 무효화(다음 호출이 재확인/재기동)
         return False, None
 
 # 링크/편집 네임스페이스 제외 목록. list_notes()와 _find_note_path()가 사용한다.
@@ -509,31 +539,8 @@ def vault_stats() -> dict:
     ok, res = _daemon_call("GET", "/vault_stats")
     if ok:
         return res
-    # 직접 폴백(데몬 미사용/불가): 단일 출처(인메모리 그래프)에서 도출
-    r = get_retriever()
-
-    def _title(nid):
-        n = r.nodes.get(str(nid))
-        return n["title"] if n else str(nid)
-
-    pred_counts = Counter(e["predicate"] for e in r.edges)
-    in_deg = Counter(_title(e["target_id"]) for e in r.edges)
-    out_deg = Counter(_title(e["source_id"]) for e in r.edges)
-
-    def _top5(counter):
-        ranked = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
-        return {t: d for t, d in ranked}
-
-    n_emb = sum(1 for n in r.nodes.values() if n["has_embedding"])
-    return {
-        "nodes_total": len(r.nodes),
-        "edges_total": len(r.edges),
-        "embedding_coverage": f"{n_emb}/{len(r.nodes)}",
-        "embedding_model": OLLAMA_MODEL,
-        "predicate_distribution": dict(pred_counts.most_common()),
-        "hub_top5_in_degree": _top5(in_deg),
-        "authority_top5_out_degree": _top5(out_deg),
-    }
+    # 직접 폴백(데몬 미사용/불가): 단일 출처(인메모리 그래프)에서 도출 — 데몬과 동일 공식
+    return retriever_mod.compute_vault_stats(get_retriever(), OLLAMA_MODEL)
 
 
 # ===== 검토 큐 위생 도구 ====================================================

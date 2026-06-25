@@ -18,7 +18,10 @@ def daemon_port(vault_db) -> int:
     hashlib로 계산 → 프록시와 데몬이 동일 포트에 합의한다."""
     env = os.environ.get("DAEMON_PORT")
     if env:
-        return int(env)
+        try:
+            return int(env)
+        except ValueError:
+            pass  # 잘못된 값이면 결정적 포트로 폴백
     h = int(hashlib.md5(str(Path(vault_db).resolve()).encode("utf-8")).hexdigest(), 16)
     return 40000 + (h % 2000)
 
