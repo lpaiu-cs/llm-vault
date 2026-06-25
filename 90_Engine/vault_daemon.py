@@ -216,14 +216,17 @@ def reindex(req: ReindexReq):
     _touch()
     try:
         with _write_lock():
-            with contextlib.redirect_stdout(sys.stderr):  # indexer 로그가 응답을 오염시키지 않게
-                stats, conn = indexer_mod.index_vault(
-                    Path(VAULT_ROOT), Path(VAULT_DB),
-                    force_rebuild=req.force, embed=req.embed,
-                    ollama_url=OLLAMA_URL, embed_model=OLLAMA_MODEL,
-                )
-                conn.close()
-            invalidate_retriever()  # 다음 read가 새 DB로 그래프 재적재
+            try:
+                with contextlib.redirect_stdout(sys.stderr):  # indexer 로그가 응답을 오염시키지 않게
+                    stats, conn = indexer_mod.index_vault(
+                        Path(VAULT_ROOT), Path(VAULT_DB),
+                        force_rebuild=req.force, embed=req.embed,
+                        ollama_url=OLLAMA_URL, embed_model=OLLAMA_MODEL,
+                    )
+                    conn.close()
+            finally:
+                # 부분 실패(in-place)에도 그래프 무효화 → 다음 read가 현재 디스크 상태로 재적재
+                invalidate_retriever()
         return stats
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(e))
