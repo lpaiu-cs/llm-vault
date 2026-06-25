@@ -478,12 +478,22 @@ pgrep -fl vault_daemon.py            # mac/Linux: 데몬 프로세스 확인
 그 쿼리를 **데몬이** 처리한 것입니다. 프록시는 데몬에 닿지 못하면 조용히 in-process로
 폴백하되 **처음 1회 stderr로 경고**하므로, MCP 클라이언트 로그에서 폴백 여부를 알 수 있습니다.
 
-### 4) git 동기화는 그대로 둡니다
+### 4) git 동기화 — cron 유지(기본) 또는 데몬으로 이관(opt-in)
 
-데몬에도 git sync 기능(`SYNC_ENABLED`)이 있지만 **기본 off로 두세요.** 기존 15분 스케줄러
-(launchd / Task Scheduler — [자동 동기화](#자동-동기화-선택))가 sync를 계속 전담합니다. 둘 다
-켜면 같은 repo를 두 syncer가 push/pull해 충돌합니다 — sync는 **하나만** 맡아야 합니다.
-(데몬은 DB 단일 소유만 담당.)
+**기본:** 데몬 sync(`SYNC_ENABLED`)는 off. 기존 15분 스케줄러(launchd / Task Scheduler —
+[자동 동기화](#자동-동기화-선택))가 sync를 전담하고, 데몬은 DB 단일 소유만 담당합니다.
+
+**데몬으로 이관(opt-in):** `SYNC_ENABLED=1`을 켜면 데몬이 **이벤트 구동 sync**(write 후
+디바운스 push + 요청 시 throttle pull)에 더해, 이벤트가 없어도 **주기 백스톱**
+(`SYNC_PERIODIC_INTERVAL`, 기본 900s = commit+pull+push)으로 Obsidian 직접편집·유휴 구간까지
+동기화합니다. 즉 15분 cron의 strict superset(평소엔 더 빠르고, 유휴 보장도 유지).
+
+> ⚠️ **한 기기에 syncer는 하나만.** 이관 시 그 기기의 기존 스케줄러(launchd/Task Scheduler)를
+> **반드시 먼저 끄세요.** 같은 로컬 repo를 둘이 동시에 push/pull하면 git 인덱스가 깨집니다.
+> (서로 다른 기기의 데몬↔cron 혼재는 무방 — 원격에서 만나며, 데몬이 rejected push를 self-heal.)
+>
+> 이관 절차(기기별): ① 기존 스케줄러 중지 → ② MCP 설정 env에 `SYNC_ENABLED=1` 추가 →
+> ③ 클라이언트 재시작 후 데몬 재기동 → ④ `/health`의 `sync_enabled:true`·`sync.status` 확인.
 
 ### 5) 진단 · 롤백
 
