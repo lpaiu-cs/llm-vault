@@ -98,6 +98,43 @@ See [SETUP.md](SETUP.md) for MCP client setup and the private/public split. See
 검토/모순/질문 라우팅 → `90_Engine/` 재인덱싱. 자세한 그림은
 [Second Brain Operating Model](00_System/Second%20Brain%20Operating%20Model.md) 참조.
 
+## Architecture
+
+**Markdown is the source of truth; DuckDB is a derived, regenerable cache.** Clients write
+Markdown through MCP tools, the indexer compiles it into a DuckDB graph cache, and the
+retriever serves layer/confidence-aware hybrid search back to the clients. The cache
+(`ltm_cache.db`) is gitignored and rebuilt per machine — only Markdown syncs across devices.
+
+**Markdown이 진실의 원천, DuckDB는 파생·재생성 가능한 캐시입니다.** 클라이언트는 MCP 도구로
+Markdown을 쓰고, 인덱서가 이를 DuckDB 그래프 캐시로 컴파일하며, 리트리버가 계층/신뢰도 인지
+하이브리드 검색으로 응답합니다. 캐시(`ltm_cache.db`)는 gitignore라 머신마다 재생성되며, 기기
+간에는 Markdown만 동기화됩니다.
+
+```mermaid
+flowchart LR
+    CLI["LLM clients<br/>Claude · Codex · Antigravity"]
+    MD["Markdown vault<br/>source of truth · 9-predicate links"]
+    IDX["indexer.py<br/>incremental compile · MD5 · orphan prune"]
+    DB[("DuckDB cache · ltm_cache.db<br/>nodes · edges · embeddings")]
+    RET["retriever.py<br/>BM25 + dense + graph expansion"]
+    MCP["mcp_server.py<br/>MCP tools"]
+    OLL["Ollama · bge-m3"]
+    GIT["git remote<br/>cross-machine sync"]
+
+    CLI -->|"create / update / delete"| MD
+    MD <-->|"pull / push"| GIT
+    MD --> IDX
+    OLL -.->|"embed"| IDX
+    IDX --> DB
+    DB --> RET
+    OLL -.->|"query embed"| RET
+    RET --> MCP
+    MCP --> CLI
+```
+
+> 동시성·프로세스 토폴로지(여러 MCP 클라이언트의 동시 접근 처리)는 단일 소유자 데몬으로
+> 진화 중입니다 — 설계는 [docs/DAEMON_DESIGN.md](docs/DAEMON_DESIGN.md) 참고.
+
 ## Getting Started
 
 - 설치, 초기 인덱싱, MCP 클라이언트 연결: [SETUP.md](SETUP.md)
