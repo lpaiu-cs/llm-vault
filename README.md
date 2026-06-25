@@ -136,6 +136,25 @@ flowchart LR
 > 해결됩니다(구현 완료, 기본 off · `USE_DAEMON=1` opt-in). 설계는
 > [docs/DAEMON_DESIGN.md](docs/DAEMON_DESIGN.md), 활성화·검증은 [SETUP.md](SETUP.md)의 '데몬 모드' 절.
 
+## Template ↔ Instance Sync (public ↔ private)
+
+이 프로젝트는 **공개 템플릿**(`llm-vault`, upstream)과 **개인 인스턴스**(`llm-vault-private`,
+origin) 두 레포로 운영됩니다. 프레임워크(엔진·문서·정책·스크립트)는 양쪽이 공유하고, 실제
+지식은 private에만 쌓입니다(경계·근거는 [SETUP.md](SETUP.md) §8).
+
+두 레포는 **프레임워크 경로만 선택 동기화**합니다 — 양방향 모두 전체 `git merge`가 아니라
+필요한 경로만 옮깁니다.
+
+| 방향 | 명령 | 옮기는 것 |
+|------|------|-----------|
+| private → public | [`scripts/sync-template.sh`](scripts/sync-template.sh) | 큐레이션된 프레임워크 개선만 (allowlist 가드) |
+| public → private | [`scripts/pull-framework.sh`](scripts/pull-framework.sh) | upstream 프레임워크 갱신 (`90_Engine`·`docs`·`scripts`·`00_System`·루트 문서) |
+
+> **왜 `git merge upstream/main`이 아닌가.** public은 스켈레톤 + `examples/` 데모, private는
+> 실지식 누적이라 두 트리가 구조적으로 분기돼 있습니다. 전체 merge는 (a) private 지식 파일을
+> modify/delete 충돌로 끌고 오고, (b) `examples/mini-vault` 데모를 실볼트에 주입해 그래프를
+> 오염시킵니다. 그래서 두 스크립트 모두 **지식 계층은 건드리지 않고 프레임워크 경로만** 옮깁니다.
+
 ## Getting Started
 
 - 설치, 초기 인덱싱, MCP 클라이언트 연결: [SETUP.md](SETUP.md)
