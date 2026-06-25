@@ -18,11 +18,13 @@ import sys
 import time
 import signal
 import threading
+import contextlib
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
 import retriever as retriever_mod  # noqa: E402
+import indexer as indexer_mod  # noqa: E402
 import daemon_client  # noqa: E402
 
 # ── 환경 (프록시가 주입; mcp_server와 동일 키) ──
@@ -76,6 +78,71 @@ def get_retriever():
     return _retriever
 
 
+def invalidate_retriever():
+    """write(reindex) 후 호출: 인메모리 그래프를 버려 다음 read가 새 DB로 재적재한다."""
+    global _retriever
+    with _lock:
+        _retriever = None
+
+
+# ── reader/writer 조정 ──
+# DuckDB는 같은 프로세스에서 read-only/read-write 연결을 동시에 못 연다(probe로 확인).
+# 따라서 다중 read는 동시 허용하되, write(reindex)는 배타(진행 중 read 연결이 0일 때만
+# read-write로 연다). writer-preference로 writer 기아를 막는다.
+class _RWLock:
+    def __init__(self):
+        self._c = threading.Condition()
+        self._readers = 0
+        self._writer = False
+        self._writers_waiting = 0
+
+    def acquire_read(self):
+        with self._c:
+            while self._writer or self._writers_waiting:
+                self._c.wait()
+            self._readers += 1
+
+    def release_read(self):
+        with self._c:
+            self._readers -= 1
+            if self._readers == 0:
+                self._c.notify_all()
+
+    def acquire_write(self):
+        with self._c:
+            self._writers_waiting += 1
+            while self._writer or self._readers:
+                self._c.wait()
+            self._writers_waiting -= 1
+            self._writer = True
+
+    def release_write(self):
+        with self._c:
+            self._writer = False
+            self._c.notify_all()
+
+
+_rw = _RWLock()
+
+
+@contextlib.contextmanager
+def _read_lock():
+    _rw.acquire_read()
+    try:
+        yield
+    finally:
+        _rw.release_read()
+
+
+@contextlib.contextmanager
+def _write_lock():
+    _rw.acquire_write()
+    try:
+        yield
+    finally:
+        _rw.release_write()
+
+
 # ── HTTP 앱 (FastAPI) ──
 from fastapi import FastAPI, HTTPException          # noqa: E402
 from pydantic import BaseModel                       # noqa: E402
@@ -115,13 +182,14 @@ def health():
 def retrieve(req: RetrieveReq):
     _touch()
     try:
-        r = get_retriever()  # 락은 최초 빌드만 보호; 이후 read는 동시 실행
-        return r.retrieve(
-            req.query, top_k=req.top_k, max_hops=req.max_hops,
-            max_nodes=req.max_nodes, include_raw=req.include_raw,
-            include_reviews=req.include_reviews,
-            confidence_weighting=req.confidence_weighting,
-        )
+        with _read_lock():  # write(reindex)와 배타; reader끼리는 동시
+            r = get_retriever()
+            return r.retrieve(
+                req.query, top_k=req.top_k, max_hops=req.max_hops,
+                max_nodes=req.max_nodes, include_raw=req.include_raw,
+                include_reviews=req.include_reviews,
+                confidence_weighting=req.confidence_weighting,
+            )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -130,7 +198,36 @@ def retrieve(req: RetrieveReq):
 def vault_stats():
     _touch()
     try:
-        return retriever_mod.compute_vault_stats(get_retriever(), OLLAMA_MODEL)
+        with _read_lock():
+            return retriever_mod.compute_vault_stats(get_retriever(), OLLAMA_MODEL)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ReindexReq(BaseModel):
+    force: bool = False
+    embed: bool = True
+
+
+@app.post("/reindex")
+def reindex(req: ReindexReq):
+    """write 경로: Markdown을 DuckDB로 증분 컴파일(in-place — 단일 소유자라 snapshot 불필요).
+    배타 write 락 → 진행 중 read 연결이 0일 때만 read-write로 연다(DuckDB 동시-연결 제약)."""
+    _touch()
+    try:
+        with _write_lock():
+            try:
+                with contextlib.redirect_stdout(sys.stderr):  # indexer 로그가 응답을 오염시키지 않게
+                    stats, conn = indexer_mod.index_vault(
+                        Path(VAULT_ROOT), Path(VAULT_DB),
+                        force_rebuild=req.force, embed=req.embed,
+                        ollama_url=OLLAMA_URL, embed_model=OLLAMA_MODEL,
+                    )
+                    conn.close()
+            finally:
+                # 부분 실패(in-place)에도 그래프 무효화 → 다음 read가 현재 디스크 상태로 재적재
+                invalidate_retriever()
+        return stats
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(e))
 

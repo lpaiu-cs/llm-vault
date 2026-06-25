@@ -274,8 +274,30 @@ def _snapshot_build():
 
 
 def _run_indexer(force: bool = False, embed: bool = True) -> dict:
-    """변경을 임시 스냅샷에 증분 컴파일한 뒤 원자 교체한다(reader 무중단).
+    """DB 인덱싱을 수행한다.
+
+    USE_DAEMON이면 단일 소유자 데몬의 /reindex로 위임한다(데몬만 DB를 만짐). 데몬에 닿지
+    못하면 **에러로 거절** — in-process로 폴백하면 두 writer가 생겨 split-brain이 되므로
+    절대 폴백하지 않는다(설계 결정 #2). USE_DAEMON off면 in-process 스냅샷 경로를 쓴다.
     stdout은 stderr로 리다이렉트해 stdio MCP JSON-RPC 채널 오염을 막는다."""
+    if USE_DAEMON:
+        global _daemon_port_cache
+        port = _get_daemon_port()
+        if not port:
+            raise RuntimeError(
+                "vault 데몬에 연결할 수 없어 쓰기를 수행하지 않았습니다. "
+                "(데몬이 DB 단일 소유자 — in-process 폴백은 split-brain이라 금지). "
+                "잠시 후 다시 시도하세요."
+            )
+        try:
+            stats = daemon_client.post(port, "/reindex",
+                                       {"force": force, "embed": embed}, timeout=900)
+        except Exception as e:
+            _daemon_port_cache = None  # 실패 → 포트 캐시 무효화(다음 호출이 재확인/재기동)
+            raise RuntimeError(f"데몬 reindex 실패: {e}") from e
+        invalidate_retriever_cache()  # 프록시 측 캐시도 무효화(데몬-다운 read 폴백 일관성)
+        return stats
+
     vault_root = _vault_root()
     with _snapshot_build() as tmp_db:
         with contextlib.redirect_stdout(sys.stderr):
@@ -507,7 +529,10 @@ def retrieve_knowledge(query: str, top_k: int = 5, max_hops: int = 2,
     if ok:
         return res
     # 직접 폴백(데몬 미사용/불가): 현 in-process 경로
-    _maybe_auto_reconcile()
+    if not USE_DAEMON:
+        # 데몬 모드의 폴백에선 auto_reconcile(=write)를 호출하지 않는다 — _run_indexer가
+        # 데몬으로 라우팅되어 hard-error가 나면 순수 READ가 실패하기 때문.
+        _maybe_auto_reconcile()
     r = get_retriever()
     return r.retrieve(query, top_k=top_k, max_hops=max_hops, max_nodes=max_nodes,
                       include_raw=include_raw, include_reviews=include_reviews,
@@ -908,19 +933,21 @@ def delete_node(title: str) -> dict:
             f"먼저 'python3 indexer.py --embed --force' 실행 필요"
         )
 
-    # 보고용: 삭제 전 노드/엣지 수를 read-only로 조회(캐시는 건드리지 않음)
+    # 보고용: 삭제 전 노드/엣지 수를 read-only로 조회. USE_DAEMON이면 DB는 데몬이 단독 소유
+    # 하므로 in-process로 열지 않는다(보고는 reindex 결과로 근사).
     node_id, edges_removed = None, 0
-    with contextlib.closing(
-            retriever_mod.connect_db(VAULT_DB, read_only=True)) as conn:
-        for nid, fp, ntitle in conn.execute(
-                "SELECT node_id, file_path, title FROM nodes").fetchall():
-            if ntitle == t or Path(fp).stem == t:
-                node_id = nid
-                break
-        if node_id is not None:
-            edges_removed = conn.execute(
-                "SELECT COUNT(*) FROM edges WHERE source_id = ? OR target_id = ?",
-                [node_id, node_id]).fetchone()[0]
+    if not USE_DAEMON:
+        with contextlib.closing(
+                retriever_mod.connect_db(VAULT_DB, read_only=True)) as conn:
+            for nid, fp, ntitle in conn.execute(
+                    "SELECT node_id, file_path, title FROM nodes").fetchall():
+                if ntitle == t or Path(fp).stem == t:
+                    node_id = nid
+                    break
+            if node_id is not None:
+                edges_removed = conn.execute(
+                    "SELECT COUNT(*) FROM edges WHERE source_id = ? OR target_id = ?",
+                    [node_id, node_id]).fetchone()[0]
 
     # 1) source of truth(파일) 먼저 제거 — 실패하면 DB를 건드리기 전에 에러가 전파(불일치 없음)
     file_removed = False
@@ -931,7 +958,8 @@ def delete_node(title: str) -> dict:
     # 2) 인덱서가 orphan 노드 + 엣지를 정리하고 dangling을 재정합(force). reader 무중단(스냅샷).
     stats = _run_indexer(force=True, embed=False)
     _mark_reconciled()
-    node_removed = (node_id is not None) and (path is None or not path.exists())
+    node_removed = (file_removed if USE_DAEMON
+                    else (node_id is not None) and (path is None or not path.exists()))
 
     warnings = []
     if node_id is None and not file_removed:
