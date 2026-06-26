@@ -415,9 +415,10 @@ pgrep -fl vault_daemon.py            # mac/Linux: 데몬 프로세스 확인
 
 ### 4) git 동기화 (선택)
 
-env에 **`SYNC_ENABLED=1`**을 두면 데몬이 sync를 담당합니다 — 이벤트 구동 push/pull + 주기
-백스톱. 동작·튜닝 변수는 위 '자동 동기화' 절을 보세요. 기본은 off(sync는 git remote + 비대화식
-자격증명이 필요하므로 opt-in).
+**클라이언트 env**에 `SYNC_ENABLED=1`을 두면(보통 클라이언트가 데몬을 먼저 기동하므로) 데몬이
+sync를 담당합니다 — 이벤트 구동 push/pull + 주기 백스톱. autostart로 데몬을 띄운다면 그
+plist/service env에도 함께 두세요(**먼저 띄운 쪽의 env가 적용**되므로, 어느 쪽이 이겨도 켜지게).
+동작·튜닝 변수는 위 '자동 동기화' 절. 기본은 off(git remote + 비대화식 자격증명 필요).
 
 ### 5) 상시가동 / startup 등록
 

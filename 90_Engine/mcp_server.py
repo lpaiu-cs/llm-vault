@@ -107,9 +107,10 @@ def _get_daemon_port():
     return None
 
 
-def _daemon(method: str, path: str, payload: dict = None, timeout: float = None):
+def _daemon(method: str, path: str, payload: dict = None, timeout: float = 120.0):
     """데몬으로 포워딩하고 결과를 반환한다. 데몬에 닿지 못하면 RuntimeError(폴백 없음).
-    데몬은 첫 요청에 자동 기동된다(daemon_client.ensure_daemon)."""
+    데몬은 첫 요청에 자동 기동된다(daemon_client.ensure_daemon). timeout은 GET/POST 모두에
+    적용한다 — 요청 경로의 _maybe_pull이 git pull을 돌 수 있어 read에도 넉넉한 기본값을 둔다."""
     global _daemon_port_cache
     port = _get_daemon_port()
     if not port:
@@ -120,10 +121,8 @@ def _daemon(method: str, path: str, payload: dict = None, timeout: float = None)
         )
     try:
         if method == "GET":
-            return daemon_client.get(port, path)
-        if timeout:
-            return daemon_client.post(port, path, payload or {}, timeout=timeout)
-        return daemon_client.post(port, path, payload or {})
+            return daemon_client.get(port, path, timeout=timeout)
+        return daemon_client.post(port, path, payload or {}, timeout=timeout)
     except Exception as e:
         _daemon_port_cache = None  # 호출 실패 → 캐시 무효화(다음 호출이 재확인/재기동)
         raise RuntimeError(f"데몬 호출 실패({path}): {e}") from e
@@ -717,11 +716,6 @@ def delete_node(title: str) -> dict:
     """
     t = _validate_title(title)
     path = _find_node_path(t)
-    if not Path(VAULT_DB).exists():
-        raise RuntimeError(
-            f"DuckDB 캐시가 없습니다: {VAULT_DB}\n"
-            f"먼저 'python3 indexer.py --embed --force' 실행 필요"
-        )
 
     # 1) source of truth(파일) 먼저 제거 — 실패하면 DB를 건드리기 전에 에러가 전파(불일치 없음)
     file_removed = False
@@ -738,7 +732,7 @@ def delete_node(title: str) -> dict:
                         "DB에 orphan 노드만 있었다면 force reindex가 정리했습니다.")
     return {
         "deleted_title": t,
-        "node_removed": file_removed,
+        "node_removed": file_removed or stats.get("nodes_pruned", 0) > 0,
         "file_removed": file_removed,
         "nodes_pruned": stats.get("nodes_pruned", 0),
         "warnings": warnings,
