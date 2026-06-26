@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 90_Engine/mcp_server.py
-Karpathy LLM Framework - MCP Server (stdio transport) v2.2  [AI-managed LTM, incremental + auto-reconcile]
+Karpathy LLM Framework - MCP Server (stdio transport) v3.0  [AI-managed LTM · 단일 소유자 데몬 프록시]
 
 원본 v1.0의 읽기 도구(retrieve_knowledge / sync_vault / vault_stats)에
 AI가 그래프를 직접 관리할 수 있는 write 도구를 추가한 버전.
@@ -15,19 +15,16 @@ AI가 그래프를 직접 관리할 수 있는 write 도구를 추가한 버전.
   - reconcile_graph()  : 전체 엣지 재구성으로 dangling 일괄 해소(주기 실행 권장)
   - list_nodes()       : 전체 node 목록(링크 타깃 선택용)
 
-설계 원칙 (원본 아키텍처 준수):
+설계 원칙:
   * 메모리는 마크다운 파일로 작성되고, indexer가 단일 게이트키퍼로
     9술어 CHECK 제약 검증 + UUID 발급 + Ollama 임베딩을 담당한다.
-  * 따라서 write 도구는 "규격에 맞는 마크다운을 쓰고 → 재인덱싱을 트리거"한다.
-    임베딩을 모델이 직접 만지지 않는다(=indexer가 자동 갱신).
-  * [v2.1] write 도구는 기본 '증분 인덱싱'(빠름)만 한다. 새 node가 기존 node로부터
-    받는 링크는 즉시 연결되지 않으므로, reconcile_graph()(또는 sync_vault(force=True))를
-    주기적으로 실행해 그래프를 정합 상태로 맞춘다. 대규모 vault에서도 재임베딩이
-    없어 비용이 낮다.
-  * [v2.2] 위 정합을 자동화한다. write 시 'pending'을 기록하고, retrieve 시 마지막
-    정합 후 debounce(기본 600초)가 지났고 pending이 있으면 1회 force 정합을 수행한다.
-    상태는 DB 옆 '<VAULT_DB>.reconcile.json'에 저장되어 세션(프로세스)이 바뀌어도
-    유지된다. 끄려면 env VAULT_AUTO_RECONCILE=0, 창 조절은 VAULT_RECONCILE_DEBOUNCE_SEC.
+  * 이 서버는 **단일 소유자 데몬(vault_daemon.py)의 얇은 프록시**다. 읽기/인덱싱은
+    localhost HTTP로 데몬에 포워딩하고(데몬만 DuckDB를 만진다), 쓰기 도구는 "규격에 맞는
+    마크다운을 쓰고 → 데몬 /reindex를 트리거"한다. 데몬은 첫 요청에 자동 기동되며, 닿지
+    못하면 in-process 폴백 없이 명확한 에러를 낸다(split-brain·락경합 방지).
+  * write 도구는 기본 증분 인덱싱(빠름)만 한다. 새 node가 '기존 node로부터' 받는 링크는
+    즉시 연결되지 않으므로, reconcile_graph()(또는 sync_vault(force=True))를 주기적으로
+    실행해 그래프를 정합한다(대규모 vault도 재임베딩 없어 저비용).
   * 링크/엣지 타깃은 반드시 대상 node의 '제목(=파일명 stem)'과 정확히 일치해야 한다.
   * predicate는 9개 화이트리스트만 허용. 그 외는 거부된다.
 
@@ -54,27 +51,19 @@ import sys
 import uuid
 import json
 import time
-import shutil
-import contextlib
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-
-try:
-    import fcntl  # POSIX 파일락 (writer 직렬화). Windows에선 O_EXCL 폴백.
-except ImportError:  # pragma: no cover
-    fcntl = None
 
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:
     sys.exit("ERROR: mcp 미설치. pip install mcp --break-system-packages")
 
-# 같은 디렉터리의 retriever / indexer 모듈을 import
+# 같은 디렉터리의 indexer 모듈을 import (frontmatter 파싱). DB 접근은 데몬이 전담한다.
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
 
-import retriever as retriever_mod
 import indexer as indexer_mod
 import daemon_client
 
@@ -87,13 +76,10 @@ VAULT_DB = os.environ.get("VAULT_DB", str(SCRIPT_DIR / "ltm_cache.db"))
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "bge-m3")
 
-# M1: 읽기는 단일 소유자 데몬으로 포워딩(USE_DAEMON). 데몬 미사용/불가 시 직접 단명 연결로 폴백.
-USE_DAEMON = os.environ.get("USE_DAEMON", "").lower() in ("1", "true", "on", "yes")
-
-
+# 읽기/쓰기 모두 단일 소유자 데몬으로 포워딩한다(데몬이 표준). 데몬은 첫 요청에 자동
+# 기동되며, 닿지 못하면 in-process 폴백 대신 명확한 에러를 낸다(split-brain·락경합 방지).
 _daemon_port_cache = None      # 최근 확인된 정상 데몬 포트(있으면 ensure/health 생략)
 _daemon_retry_after = 0.0      # 네거티브 캐시: 이 시각 전엔 ensure_daemon 재시도 안 함
-_daemon_fallback_warned = False  # 무음 폴백 1회 경고 플래그(데몬 정상 도달 시 재무장)
 
 
 def _daemon_env() -> dict:
@@ -121,39 +107,25 @@ def _get_daemon_port():
     return None
 
 
-def _warn_daemon_fallback(reason: str):
-    """USE_DAEMON인데 데몬에 닿지 못해 in-process로 폴백할 때 '처음 한 번' stderr로 알린다.
-    무음 폴백이 데몬 완전 실패(예: Windows venv-인터프리터 spawn 버그)를 가리지 않게 한다.
-    stdout이 아니라 stderr라 MCP(JSON-RPC) 프레이밍을 깨지 않는다. See handoff/DAEMON_SPAWN_FIX.md §6."""
-    global _daemon_fallback_warned
-    if not _daemon_fallback_warned:
-        _daemon_fallback_warned = True
-        print(f"[llm-vault] USE_DAEMON=1이지만 데몬에 닿지 못해 in-process로 폴백합니다 "
-              f"({reason}). 진단: DAEMON_DEBUG=1 후 90_Engine/daemon.spawn.log 확인.",
-              file=sys.stderr)
-
-
-def _daemon_call(method: str, path: str, payload: dict = None):
-    """USE_DAEMON이면 데몬으로 포워딩하고 (True, 결과). 미사용/불가/실패면 (False, None)
-    → 호출부가 현 in-process 경로로 폴백한다(데몬-다운 read 복원력)."""
-    global _daemon_port_cache, _daemon_fallback_warned
-    if not USE_DAEMON:
-        return False, None
+def _daemon(method: str, path: str, payload: dict = None, timeout: float = 120.0):
+    """데몬으로 포워딩하고 결과를 반환한다. 데몬에 닿지 못하면 RuntimeError(폴백 없음).
+    데몬은 첫 요청에 자동 기동된다(daemon_client.ensure_daemon). timeout은 GET/POST 모두에
+    적용한다 — 요청 경로의 _maybe_pull이 git pull을 돌 수 있어 read에도 넉넉한 기본값을 둔다."""
+    global _daemon_port_cache
     port = _get_daemon_port()
     if not port:
-        _warn_daemon_fallback("데몬 기동/health 실패")
-        return False, None
+        raise RuntimeError(
+            "vault 데몬에 연결할 수 없습니다. 의존성(fastapi/uvicorn/pydantic)이 venv에 "
+            "설치됐는지 확인하고, DAEMON_DEBUG=1로 90_Engine/daemon.spawn.log를 보세요. "
+            "(See handoff/DAEMON_SPAWN_FIX.md)"
+        )
     try:
         if method == "GET":
-            res = daemon_client.get(port, path)
-        else:
-            res = daemon_client.post(port, path, payload or {})
-        _daemon_fallback_warned = False  # 정상 도달 → 다음 outage 때 다시 경고하도록 재무장
-        return True, res
+            return daemon_client.get(port, path, timeout=timeout)
+        return daemon_client.post(port, path, payload or {}, timeout=timeout)
     except Exception as e:
         _daemon_port_cache = None  # 호출 실패 → 캐시 무효화(다음 호출이 재확인/재기동)
-        _warn_daemon_fallback(f"데몬 호출 실패: {type(e).__name__}")
-        return False, None
+        raise RuntimeError(f"데몬 호출 실패({path}): {e}") from e
 
 # 링크/편집 네임스페이스 제외 목록. list_nodes()와 _find_node_path()가 사용한다.
 # 05_Inbox/06_Raw는 wikilink/edge 타깃이 아니라 source_path로만 참조되므로 여기서 제외.
@@ -166,36 +138,6 @@ EXCLUDE_PARTS = ("90_Engine", ".git", ".obsidian", "05_Inbox", "06_Raw",
 EDGE_HEADING = "## 핵심 엣지"
 EMPTY_EDGE_PLACEHOLDER = "<!-- 아직 엣지 없음 -->"
 
-# 자동 정합(auto-reconcile) 설정
-AUTO_RECONCILE = os.environ.get("VAULT_AUTO_RECONCILE", "1").lower() not in ("0", "false", "no")
-RECONCILE_DEBOUNCE_SEC = int(os.environ.get("VAULT_RECONCILE_DEBOUNCE_SEC", "600"))
-_STATE_PATH = Path(VAULT_DB + ".reconcile.json")
-
-
-# ─────────────────────────────────────────────────────────────
-# Retriever 인스턴스 (lazy + cached)
-# ─────────────────────────────────────────────────────────────
-_retriever_cache: Optional["retriever_mod.Retriever"] = None
-
-
-def get_retriever():
-    global _retriever_cache
-    if _retriever_cache is None:
-        if not Path(VAULT_DB).exists():
-            raise RuntimeError(
-                f"DuckDB 캐시가 없습니다: {VAULT_DB}\n"
-                f"먼저 'python3 indexer.py --embed --force' 실행 필요"
-            )
-        _retriever_cache = retriever_mod.Retriever(
-            VAULT_DB, OLLAMA_URL, OLLAMA_MODEL, vault_root=VAULT_ROOT
-        )
-    return _retriever_cache
-
-
-def invalidate_retriever_cache():
-    global _retriever_cache
-    _retriever_cache = None
-
 
 # ─────────────────────────────────────────────────────────────
 # 내부 헬퍼
@@ -204,170 +146,10 @@ def _vault_root() -> Path:
     return Path(VAULT_ROOT).resolve()
 
 
-@contextlib.contextmanager
-def _build_lock(retries: int = 300, delay: float = 0.1):
-    """writer를 직렬화하는 빌드 락. flock은 프로세스가 죽으면 커널이 자동 해제하므로
-    크래시에 강하다. fcntl이 없으면(Windows 등) O_EXCL 락파일로 폴백한다."""
-    lock_path = Path(VAULT_DB).with_suffix(Path(VAULT_DB).suffix + ".build.lock")
-    busy = "vault이 다른 쓰기 작업으로 사용 중입니다. 잠시 후 다시 시도하세요."
-    if fcntl is not None:
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
-        try:
-            for _ in range(retries):
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except OSError:
-                    time.sleep(delay)
-            else:
-                raise RuntimeError(busy)
-            yield
-        finally:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            finally:
-                os.close(fd)
-    else:  # 폴백: 원자적 O_EXCL 락파일
-        for _ in range(retries):
-            try:
-                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
-                break
-            except FileExistsError:
-                time.sleep(delay)
-        else:
-            raise RuntimeError(busy)
-        try:
-            yield
-        finally:
-            os.close(fd)
-            try:
-                os.unlink(lock_path)
-            except OSError:
-                pass
-
-
-@contextlib.contextmanager
-def _snapshot_build():
-    """Immutable snapshot + atomic swap.
-
-    라이브 DB를 임시본(.building)으로 복사해 yield한다. 블록이 정상 종료되면
-    os.replace로 라이브 경로에 원자 교체한다. writer는 라이브 DB를 제자리에서 절대
-    열지 않고 항상 임시본만 빌드하므로, read_only reader와 같은 inode를 공유하지 않아
-    'Conflicting lock'이 구조적으로 발생하지 않는다. 이미 라이브 DB를 열어둔 in-flight
-    reader는 swap 뒤에도 옛 스냅샷(unlink된 inode)을 끝까지 읽으므로 안전하다.
-    writer끼리는 _build_lock으로 직렬화한다. 정상 swap 후 캐시를 무효화한다."""
-    db_path = Path(VAULT_DB)
-    tmp_path = db_path.with_suffix(db_path.suffix + ".building")
-    tmp_wal = Path(str(tmp_path) + ".wal")
-    live_wal = Path(str(db_path) + ".wal")
-
-    def _unlink(*paths):
-        for p in paths:
-            try:
-                p.unlink()
-            except FileNotFoundError:
-                pass
-
-    with _build_lock():
-        _unlink(tmp_path, tmp_wal)
-        if db_path.exists():
-            shutil.copy2(db_path, tmp_path)
-            # 라이브에 미체크포인트 WAL이 남아 있으면 함께 복사해 데이터 보존
-            if live_wal.exists():
-                shutil.copy2(live_wal, tmp_wal)
-        try:
-            yield tmp_path
-            # swap 전에 스냅샷을 단일 파일로 보장: 남은 WAL을 접어 넣는다
-            if tmp_wal.exists():
-                with contextlib.closing(
-                        retriever_mod.connect_db(str(tmp_path), read_only=False)) as c:
-                    c.execute("CHECKPOINT")
-            os.replace(tmp_path, db_path)
-        except BaseException:
-            _unlink(tmp_path, tmp_wal)
-            raise
-        # swap 후 떠도는 WAL 제거(라이브/임시 모두) — 라이브는 항상 단일 파일
-        _unlink(live_wal, tmp_wal)
-    invalidate_retriever_cache()
-
-
 def _run_indexer(force: bool = False, embed: bool = True) -> dict:
-    """DB 인덱싱을 수행한다.
-
-    USE_DAEMON이면 단일 소유자 데몬의 /reindex로 위임한다(데몬만 DB를 만짐). 데몬에 닿지
-    못하면 **에러로 거절** — in-process로 폴백하면 두 writer가 생겨 split-brain이 되므로
-    절대 폴백하지 않는다(설계 결정 #2). USE_DAEMON off면 in-process 스냅샷 경로를 쓴다.
-    stdout은 stderr로 리다이렉트해 stdio MCP JSON-RPC 채널 오염을 막는다."""
-    if USE_DAEMON:
-        global _daemon_port_cache
-        port = _get_daemon_port()
-        if not port:
-            raise RuntimeError(
-                "vault 데몬에 연결할 수 없어 쓰기를 수행하지 않았습니다. "
-                "(데몬이 DB 단일 소유자 — in-process 폴백은 split-brain이라 금지). "
-                "잠시 후 다시 시도하세요."
-            )
-        try:
-            stats = daemon_client.post(port, "/reindex",
-                                       {"force": force, "embed": embed}, timeout=900)
-        except Exception as e:
-            _daemon_port_cache = None  # 실패 → 포트 캐시 무효화(다음 호출이 재확인/재기동)
-            raise RuntimeError(f"데몬 reindex 실패: {e}") from e
-        invalidate_retriever_cache()  # 프록시 측 캐시도 무효화(데몬-다운 read 폴백 일관성)
-        return stats
-
-    vault_root = _vault_root()
-    with _snapshot_build() as tmp_db:
-        with contextlib.redirect_stdout(sys.stderr):
-            stats, conn = indexer_mod.index_vault(
-                vault_root, tmp_db,
-                force_rebuild=force, embed=embed,
-                ollama_url=OLLAMA_URL, embed_model=OLLAMA_MODEL,
-            )
-            conn.close()  # close가 체크포인트; 잔여 WAL은 _snapshot_build가 swap 전 접어 넣음
-    return stats
-
-
-def _load_state() -> dict:
-    try:
-        return json.loads(_STATE_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {"pending": 0, "last_reconcile": 0.0}
-
-
-def _save_state(st: dict) -> None:
-    try:
-        _STATE_PATH.write_text(json.dumps(st), encoding="utf-8")
-    except Exception:
-        pass
-
-
-def _mark_pending(n: int = 1) -> None:
-    """write 후 호출: 미정합 변경 카운터를 영속 증가."""
-    st = _load_state()
-    st["pending"] = int(st.get("pending", 0)) + n
-    _save_state(st)
-
-
-def _mark_reconciled() -> None:
-    _save_state({"pending": 0, "last_reconcile": time.time()})
-
-
-def _maybe_auto_reconcile():
-    """retrieve 직전 호출: pending이 있고 debounce 창이 지났으면 1회 force 정합(재임베딩 X).
-    상태가 영속되므로 세션이 바뀌어도 직전 변경이 다음 세션 첫 검색에서 정리된다."""
-    if not AUTO_RECONCILE:
-        return None
-    st = _load_state()
-    pending = int(st.get("pending", 0))
-    last = float(st.get("last_reconcile", 0.0))
-    if pending > 0 and (time.time() - last) >= RECONCILE_DEBOUNCE_SEC:
-        stats = _run_indexer(force=True, embed=False)
-        _mark_reconciled()
-        return {"auto_reconciled": True,
-                "edges_inserted": stats.get("edges_inserted"),
-                "edges_dangling": stats.get("edges_dangling")}
-    return None
+    """DB 인덱싱을 단일 소유자 데몬의 /reindex로 위임한다(데몬만 DB를 만진다).
+    데몬에 닿지 못하면 에러 — split-brain 방지로 in-process 폴백은 없다."""
+    return _daemon("POST", "/reindex", {"force": force, "embed": embed}, timeout=900)
 
 
 def _validate_title(title: str) -> str:
@@ -552,24 +334,12 @@ def retrieve_knowledge(query: str, top_k: int = 5, max_hops: int = 2,
         include_reviews: 60/70/80 검토·메타 계층 포함 (기본 False)
         confidence_weighting: confidence(low/medium) 강등 적용 (기본 True)
 
-    참고: 호출 시 debounce 조건이 맞으면 그동안의 변경을 자동으로 1회 정합한다.
     """
-    ok, res = _daemon_call("POST", "/retrieve", {
+    return _daemon("POST", "/retrieve", {
         "query": query, "top_k": top_k, "max_hops": max_hops, "max_nodes": max_nodes,
         "include_raw": include_raw, "include_reviews": include_reviews,
         "confidence_weighting": confidence_weighting,
     })
-    if ok:
-        return res
-    # 직접 폴백(데몬 미사용/불가): 현 in-process 경로
-    if not USE_DAEMON:
-        # 데몬 모드의 폴백에선 auto_reconcile(=write)를 호출하지 않는다 — _run_indexer가
-        # 데몬으로 라우팅되어 hard-error가 나면 순수 READ가 실패하기 때문.
-        _maybe_auto_reconcile()
-    r = get_retriever()
-    return r.retrieve(query, top_k=top_k, max_hops=max_hops, max_nodes=max_nodes,
-                      include_raw=include_raw, include_reviews=include_reviews,
-                      confidence_weighting=confidence_weighting)
 
 
 @mcp.tool()
@@ -584,21 +354,14 @@ def sync_vault(force: bool = False, embed: bool = True) -> dict:
         force: True면 MD5 무관 모든 파일의 엣지 강제 재구성
         embed: True면 Ollama 임베딩 빌드 (Ollama 미가동 시 graceful skip)
     """
-    stats = _run_indexer(force=force, embed=embed)
-    if force:
-        _mark_reconciled()
-    return stats
+    return _run_indexer(force=force, embed=embed)
 
 
 @mcp.tool()
 def vault_stats() -> dict:
     """현재 Vault 그래프 통계: node/엣지 수, 임베딩 커버리지, 술어 분포,
     Hub Top 5(in-degree), Authority Top 5(out-degree)."""
-    ok, res = _daemon_call("GET", "/vault_stats")
-    if ok:
-        return res
-    # 직접 폴백(데몬 미사용/불가): 단일 출처(인메모리 그래프)에서 도출 — 데몬과 동일 공식
-    return retriever_mod.compute_vault_stats(get_retriever(), OLLAMA_MODEL)
+    return _daemon("GET", "/vault_stats")
 
 
 # ===== 검토 큐 위생 도구 ====================================================
@@ -758,12 +521,8 @@ def create_node(title: str, body: str, type: str = "Concept",
         stats = _run_indexer(force=True, embed=False)
 
     warnings = _dangling_warnings(norm_edges)
-    if resolve_links:
-        _mark_reconciled()
-    else:
-        _mark_pending()
-        if warnings:
-            warnings.append("기존 node가 이 node를 링크 중이라면 다음 검색 때 자동 정합으로 연결됩니다(또는 reconcile_graph()).")
+    if not resolve_links and warnings:
+        warnings.append("기존 node가 이 node를 링크 중이라면 reconcile_graph()로 정합하세요.")
     return {
         "created": str(note_path),
         "title": title,
@@ -851,9 +610,6 @@ def update_node(title: str, body: Optional[str] = None, edges: Optional[list] = 
     stats = _run_indexer(force=False, embed=embed)
     if resolve_links:
         stats = _run_indexer(force=True, embed=False)
-        _mark_reconciled()
-    else:
-        _mark_pending()
     return {
         "updated": str(path),
         "title": title,
@@ -960,27 +716,6 @@ def delete_node(title: str) -> dict:
     """
     t = _validate_title(title)
     path = _find_node_path(t)
-    if not Path(VAULT_DB).exists():
-        raise RuntimeError(
-            f"DuckDB 캐시가 없습니다: {VAULT_DB}\n"
-            f"먼저 'python3 indexer.py --embed --force' 실행 필요"
-        )
-
-    # 보고용: 삭제 전 노드/엣지 수를 read-only로 조회. USE_DAEMON이면 DB는 데몬이 단독 소유
-    # 하므로 in-process로 열지 않는다(보고는 reindex 결과로 근사).
-    node_id, edges_removed = None, 0
-    if not USE_DAEMON:
-        with contextlib.closing(
-                retriever_mod.connect_db(VAULT_DB, read_only=True)) as conn:
-            for nid, fp, ntitle in conn.execute(
-                    "SELECT node_id, file_path, title FROM nodes").fetchall():
-                if ntitle == t or Path(fp).stem == t:
-                    node_id = nid
-                    break
-            if node_id is not None:
-                edges_removed = conn.execute(
-                    "SELECT COUNT(*) FROM edges WHERE source_id = ? OR target_id = ?",
-                    [node_id, node_id]).fetchone()[0]
 
     # 1) source of truth(파일) 먼저 제거 — 실패하면 DB를 건드리기 전에 에러가 전파(불일치 없음)
     file_removed = False
@@ -988,21 +723,16 @@ def delete_node(title: str) -> dict:
         path.unlink()
         file_removed = True
 
-    # 2) 인덱서가 orphan 노드 + 엣지를 정리하고 dangling을 재정합(force). reader 무중단(스냅샷).
+    # 2) 데몬이 orphan 노드 + 그에 닿는 엣지를 정리하고 dangling을 재정합(force reindex).
     stats = _run_indexer(force=True, embed=False)
-    _mark_reconciled()
-    node_removed = (file_removed if USE_DAEMON
-                    else (node_id is not None) and (path is None or not path.exists()))
 
     warnings = []
-    if node_id is None and not file_removed:
-        warnings.append("해당 제목의 node도 .md 파일도 찾지 못했습니다(title 불일치 가능).")
-    elif node_id is not None and not file_removed:
-        warnings.append("DB에 node는 있었으나 .md 파일을 못 찾아, orphan 노드만 정리했습니다.")
+    if not file_removed:
+        warnings.append("해당 제목의 .md 파일을 찾지 못했습니다(title 불일치 가능). "
+                        "DB에 orphan 노드만 있었다면 force reindex가 정리했습니다.")
     return {
         "deleted_title": t,
-        "node_removed": node_removed,
-        "edges_removed": edges_removed,
+        "node_removed": file_removed or stats.get("nodes_pruned", 0) > 0,
         "file_removed": file_removed,
         "nodes_pruned": stats.get("nodes_pruned", 0),
         "warnings": warnings,
@@ -1023,7 +753,6 @@ def reconcile_graph(embed: bool = False) -> dict:
         embed: True면 누락/변경 임베딩도 함께 보강
     """
     stats = _run_indexer(force=True, embed=embed)
-    _mark_reconciled()
     return {
         "edges_inserted": stats.get("edges_inserted"),
         "edges_rejected": stats.get("edges_rejected"),

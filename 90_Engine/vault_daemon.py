@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""90_Engine/vault_daemon.py — single-owner vault daemon (M1: read endpoints).
+"""90_Engine/vault_daemon.py — single-owner vault daemon (표준).
 
 Why: the snapshot+os.replace concurrency model is POSIX-bound. A single owner
 process per machine removes multi-process DuckDB file contention entirely and is
-cross-platform. Thin `mcp_server.py` proxies forward tool calls here over
-localhost HTTP. See docs/DAEMON_DESIGN.md.
+cross-platform. Thin `mcp_server.py` proxies forward ALL tool calls here over
+localhost HTTP (in-process DB 경로 없음). See docs/DAEMON_DESIGN.md.
 
-M1 scope: read endpoints only (`/health`, `/retrieve`, `/vault_stats`) +
-lifecycle (singleton via deterministic port + portfile, optional idle shutdown).
-Writes still go through the proxy's in-process path until M2.
+Endpoints: `/health`, `/retrieve`, `/vault_stats` (read) + `/reindex` (write —
+데몬이 DB 단일 소유). git 동기화는 SYNC_ENABLED일 때 이벤트 구동 + 주기 백스톱.
+Lifecycle: singleton via deterministic port, optional idle shutdown(기본 off).
 
 One daemon per machine per vault. Discovery: deterministic port from the vault
 DB path (proxy and daemon compute the same port); liveness via /health.

@@ -13,7 +13,7 @@
 | `vault_stats()` | node/엣지 수, 임베딩 커버리지, predicate 분포, hub/authority 상위 node를 반환합니다. |
 | `review_queue(status="open", layer=None)` | 검토·질문·모순 큐(`60/70/80`)의 항목을 상태별로 모아 반환합니다. 검토 큐 위생용. |
 
-`retrieve_knowledge()`는 자동 정합 조건이 맞으면 pending 변경분을 한 번 정리한 뒤 검색합니다.
+`retrieve_knowledge()`는 단일 소유자 데몬으로 포워딩되어 하이브리드 검색 결과를 반환합니다.
 
 ### Layer & Confidence-Aware Retrieval
 
@@ -70,24 +70,16 @@ predicate는 9개만 허용됩니다.
 
 target은 대상 node의 제목, 즉 파일명 stem과 정확히 같아야 합니다. write 전에 `list_nodes()`로 확인하면 dangling edge를 줄일 수 있습니다.
 
-## Auto Reconcile
+## 그래프 정합 (Reconcile)
 
-write 도구는 기본적으로 증분 인덱싱만 수행합니다. 새 node 자체와 그 node가 내보내는 edge는 바로 반영되지만, 기존 node가 새 node를 향하던 dangling edge는 전체 edge 재구성 전까지 남을 수 있습니다.
+write 도구는 기본적으로 증분 인덱싱만 수행합니다. 새 node 자체와 그 node가 내보내는 edge는 바로 반영되지만, **기존 node가 새 node를 향하던 dangling edge**는 전체 edge 재구성 전까지 남을 수 있습니다.
 
-v2.2는 이 비용을 줄이기 위해 자동 정합 상태를 `<VAULT_DB>.reconcile.json`에 저장합니다.
+해소 방법(둘 다 데몬의 force reindex로 위임):
 
-- write 도구 호출 시 pending 상태를 기록합니다.
-- `retrieve_knowledge()` 호출 시 pending이 있고 debounce 시간이 지났으면 `force=True, embed=False` 정합을 1회 수행합니다.
-- 기본 debounce는 600초입니다.
+- **쓰기 시 즉시 정합** — `create_node(..., resolve_links=True)` / `update_node(..., resolve_links=True)`. 그 node로 향하던 기존 dangling edge를 곧바로 연결합니다.
+- **일괄 정합** — `reconcile_graph(embed=False)` 또는 `sync_vault(force=True)`를 주기적으로 호출합니다.
 
-환경 변수:
-
-| 변수 | 기본값 | 설명 |
-|---|---:|---|
-| `VAULT_AUTO_RECONCILE` | `1` | `0`, `false`, `no`로 설정하면 자동 정합을 끕니다. |
-| `VAULT_RECONCILE_DEBOUNCE_SEC` | `600` | 자동 정합 최소 간격입니다. |
-
-즉시 정합이 필요하면 `reconcile_graph(embed=False)`를 호출하거나 `create_node(..., resolve_links=True)`, `update_node(..., resolve_links=True)`를 사용합니다.
+> 과거의 자동 정합 상태머신(`<VAULT_DB>.reconcile.json` + `VAULT_AUTO_RECONCILE`/`VAULT_RECONCILE_DEBOUNCE_SEC`)은 데몬 표준화와 함께 제거됐습니다 — 정합은 이제 위처럼 **명시적으로** 트리거합니다.
 
 ## Agent Workflow
 

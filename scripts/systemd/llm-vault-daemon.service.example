@@ -1,0 +1,36 @@
+# scripts/systemd/llm-vault-daemon.service.example
+# Linux(systemd user) llm-vault 데몬 상시가동 서비스.
+#
+# 데몬은 MCP 클라이언트의 첫 요청에 자동 기동·상주하므로 보통 불필요하다. 단, 로그인
+# 직후 클라이언트 없이도 데몬을 띄워 주기 sync가 돌게 하려면 등록한다(죽으면 자동 재기동).
+#
+# 설치(기기마다 1회):
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/systemd/llm-vault-daemon.service.example ~/.config/systemd/user/llm-vault-daemon.service
+#   # <REPO> 를 private 인스턴스 저장소 절대경로로 치환
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now llm-vault-daemon.service
+#   loginctl enable-linger "$USER"        # 로그아웃 상태에서도 상주
+#   systemctl --user status llm-vault-daemon            # 확인
+#   journalctl --user -u llm-vault-daemon -f            # 로그
+# 제거:
+#   systemctl --user disable --now llm-vault-daemon.service
+#
+# SYNC_ENABLED=1 은 데몬이 git 동기화까지 맡게 한다(원치 않으면 그 Environment 줄을 지운다).
+# 자격증명은 비대화식(git credential helper/PAT 또는 ssh-agent)으로 설정돼 있어야 한다.
+
+[Unit]
+Description=llm-vault single-owner daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=<REPO>
+Environment=SYNC_ENABLED=1
+ExecStart=<REPO>/.venv/bin/python <REPO>/90_Engine/vault_daemon.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

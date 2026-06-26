@@ -132,9 +132,25 @@ flowchart LR
     MCP --> CLI
 ```
 
-> 동시성·프로세스 토폴로지(여러 MCP 클라이언트의 동시 접근 처리)는 **단일 소유자 데몬**으로
-> 해결됩니다(구현 완료, 기본 off · `USE_DAEMON=1` opt-in). 설계는
-> [docs/DAEMON_DESIGN.md](docs/DAEMON_DESIGN.md), 활성화·검증은 [SETUP.md](SETUP.md)의 '데몬 모드' 절.
+> 동시성·프로세스 토폴로지는 **단일 소유자 데몬**(`vault_daemon.py`)이 표준으로 처리합니다 —
+> `mcp_server.py`는 데몬의 얇은 프록시이고, 모든 읽기/쓰기가 localhost HTTP로 데몬에
+> 포워딩됩니다(in-process DB 경로 없음). 설계는 [docs/DAEMON_DESIGN.md](docs/DAEMON_DESIGN.md).
+
+## Daemon (always-on & startup)
+
+데몬(`vault_daemon.py`)은 **MCP 클라이언트의 첫 요청에 자동 기동**되어 idle 종료 없이
+상주합니다(`DAEMON_IDLE_SHUTDOWN` 기본 off). 즉 한 번이라도 클라이언트를 열면 계속 떠 있고,
+별도 env(`USE_DAEMON` 등)는 필요 없습니다. `mcp_server.py`는 데몬의 얇은 프록시입니다.
+
+**상시가동 / startup 등록.** 재부팅 직후 클라이언트를 한 번도 안 열어도 데몬이 떠서 주기 git
+sync가 돌게 하려면, 로그인 시 데몬을 띄우도록 등록하세요(예시 파일 포함):
+
+- **macOS** — [`scripts/launchd/com.llm-vault-daemon.plist.example`](scripts/launchd/com.llm-vault-daemon.plist.example) (RunAtLoad + KeepAlive)
+- **Linux** — [`scripts/systemd/llm-vault-daemon.service.example`](scripts/systemd/llm-vault-daemon.service.example) (Restart=always)
+- **Windows** — 시작프로그램(`shell:startup`)에 `pythonw.exe vault_daemon.py` 바로가기/`.cmd`, 또는 작업 스케줄러 '로그온 시' 트리거.
+
+단계별 명령·치환·`SYNC_ENABLED`(데몬이 git 동기화까지 담당)는 [SETUP.md](SETUP.md)의 '데몬' 절.
+한 기기에 데몬은 하나(싱글턴)이며 모든 클라이언트가 공유합니다.
 
 ## Template ↔ Instance Sync (public ↔ private)
 
@@ -206,8 +222,8 @@ llm-vault/
 └── 90_Engine/                 # 런타임/인덱스/MCP
     ├── indexer.py
     ├── retriever.py
-    ├── mcp_server.py          # MCP stdio 서버(데몬 모드면 프록시)
-    ├── vault_daemon.py        # 단일 소유자 데몬 (USE_DAEMON; FastAPI/localhost)
+    ├── mcp_server.py          # MCP stdio 서버 (데몬의 얇은 프록시)
+    ├── vault_daemon.py        # 단일 소유자 데몬 (표준; FastAPI/localhost, 자동 기동)
     ├── daemon_client.py       # 데몬 디스커버리 + 경량 HTTP 클라이언트
     ├── vault_sync.py          # 데몬 구동 git 동기화 헬퍼(이벤트 구동)
     └── ltm_cache.db           # local generated cache, ignored by git

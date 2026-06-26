@@ -2,8 +2,9 @@
 
 > 상태: **구현 완료 · main 반영**. M1(read 포워딩)·M2(write 소유)·M3(이벤트 구동 git sync)이
 > 머지됐고, Windows venv-인터프리터 spawn 버그가 후속 수정됨
-> ([handoff/DAEMON_SPAWN_FIX.md](../handoff/DAEMON_SPAWN_FIX.md)). 기본은 in-process이며
-> 데몬은 `USE_DAEMON=1`로 opt-in한다(사용자 설정: SETUP.md '데몬 모드' 절). 결정 사항은 §11.
+> ([handoff/DAEMON_SPAWN_FIX.md](../handoff/DAEMON_SPAWN_FIX.md)). 후속으로 **데몬이 표준 구성**이
+> 되어 mcp_server는 데몬의 얇은 프록시가 되고 in-process DB 경로·`USE_DAEMON` 플래그는 제거됐다
+> (SETUP.md '데몬' 절). 아래 §9의 롤아웃/플래그 서술은 당시 단계적 도입 기록이다. 결정 사항은 §11.
 > 관련: [[2026-06-25-llm-vault-engine-concurrency-snapshot-writes]],
 > [[2026-06-21-cross-device-sync-via-git]].
 
