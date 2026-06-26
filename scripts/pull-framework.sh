@@ -30,6 +30,13 @@ git fetch upstream
 echo "[pull-framework] checkout framework paths from upstream/main ..."
 git checkout upstream/main -- "${FRAMEWORK_PATHS[@]}"
 
+# checkout는 추가/수정만 반영한다. upstream에서 '삭제된' 프레임워크 파일도 맞춰 지운다
+# (안 그러면 삭제된 cron/스크립트 등이 private에 유령처럼 남는다). 지식 계층은 경로 밖이라 무관.
+echo "[pull-framework] reconciling deletions (upstream에서 사라진 프레임워크 파일 제거) ..."
+git ls-files -- "${FRAMEWORK_PATHS[@]}" | while IFS= read -r f; do
+  git cat-file -e "upstream/main:$f" 2>/dev/null || git rm -q --ignore-unmatch -- "$f"
+done
+
 if git diff --cached --quiet; then
   echo "[pull-framework] 변경 없음 — 프레임워크가 이미 최신입니다."
   exit 0
