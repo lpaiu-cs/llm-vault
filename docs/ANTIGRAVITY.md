@@ -1,13 +1,13 @@
 # Antigravity 연결 가이드
 
-이 문서는 `llm-vault`를 Google Antigravity의 MCP 서버로 연결하는 방법을 설명합니다.
+이 문서는 `ltm-vault`를 Google Antigravity의 MCP 서버로 연결하는 방법을 설명합니다.
 연결이 끝나면 Antigravity가 vault의 node를 검색하고, 필요한 경우 MCP write 도구로 메모리를 추가·수정할 수 있습니다.
 
 전체 도구 목록은 [MCP_TOOLS.md](MCP_TOOLS.md)를 기준으로 보세요.
 
 ## 전제 조건
 
-- `llm-vault`가 로컬에 클론되어 있어야 합니다.
+- `ltm-vault`가 로컬에 클론되어 있어야 합니다.
 - Python 의존성이 설치되어 있어야 합니다.
 - `90_Engine/ltm_cache.db`가 생성되어 있어야 합니다.
 - 의미 검색을 쓰려면 Ollama와 `bge-m3` 모델이 준비되어 있어야 합니다.
@@ -15,7 +15,7 @@
 예시:
 
 ```powershell
-cd E:\vv\llm-vault-private
+cd E:\vv\ltm-vault-private
 pip install -r requirements.txt
 ollama pull bge-m3
 python.exe 90_Engine\indexer.py --force --embed --report
@@ -47,21 +47,21 @@ C:\Users\<사용자명>\.gemini\config\mcp_config.json
 
 ## 설정 예시
 
-아래 예시는 vault 루트가 `E:\vv\llm-vault-private`인 Windows 환경입니다.
+아래 예시는 vault 루트가 `E:\vv\ltm-vault-private`인 Windows 환경입니다.
 경로는 JSON에서 `/`를 쓰는 편이 안전합니다.
 
 ```json
 {
   "mcpServers": {
-    "llm-vault": {
+    "ltm-vault": {
       "command": "C:/Users/<사용자명>/AppData/Local/Programs/Python/Python312/python.exe",
       "args": [
-        "E:/vv/llm-vault-private/90_Engine/mcp_server.py"
+        "E:/vv/ltm-vault-private/90_Engine/mcp_server.py"
       ],
-      "cwd": "E:/vv/llm-vault-private",
+      "cwd": "E:/vv/ltm-vault-private",
       "env": {
-        "VAULT_ROOT": "E:/vv/llm-vault-private",
-        "VAULT_DB": "E:/vv/llm-vault-private/90_Engine/ltm_cache.db",
+        "VAULT_ROOT": "E:/vv/ltm-vault-private",
+        "VAULT_DB": "E:/vv/ltm-vault-private/90_Engine/ltm_cache.db",
         "OLLAMA_URL": "http://localhost:11434",
         "OLLAMA_MODEL": "bge-m3"
       }
@@ -70,7 +70,7 @@ C:\Users\<사용자명>\.gemini\config\mcp_config.json
 }
 ```
 
-이미 `mcpServers`가 있는 파일이라면 전체 파일을 덮어쓰지 말고 `"llm-vault"` 항목만 추가하세요.
+이미 `mcpServers`가 있는 파일이라면 전체 파일을 덮어쓰지 말고 `"ltm-vault"` 항목만 추가하세요.
 
 ## 재시작 및 연결 확인
 
@@ -79,13 +79,13 @@ C:\Users\<사용자명>\.gemini\config\mcp_config.json
 채팅에서 다음처럼 요청해 연결을 확인할 수 있습니다:
 
 ```text
-llm-vault MCP의 vault_stats를 호출해서 현재 node와 엣지 수를 알려줘.
+ltm-vault MCP의 vault_stats를 호출해서 현재 node와 엣지 수를 알려줘.
 ```
 
 또는:
 
 ```text
-llm-vault에서 "Vibe Coding의 위험"을 retrieve_knowledge로 검색해줘.
+ltm-vault에서 "Vibe Coding의 위험"을 retrieve_knowledge로 검색해줘.
 ```
 
 정상 연결되면 vault의 node 수, 엣지 수, 검색 결과가 응답에 포함됩니다.
@@ -95,9 +95,9 @@ llm-vault에서 "Vibe Coding의 위험"을 retrieve_knowledge로 검색해줘.
 Antigravity가 언제 vault를 조회해야 하는지 알려주려면 `~/.gemini/GEMINI.md`에 아래 섹션을 추가합니다.
 
 ```md
-## llm-vault memory
+## ltm-vault memory
 
-- 사용자가 "내 기억", "내 기준", "이전에 정한 것", "내 node", "예전에 정리한 것"을 언급하거나 장기 지식이 필요한 질문을 하면 먼저 llm-vault MCP의 `retrieve_knowledge`를 호출한다.
+- 사용자가 "내 기억", "내 기준", "이전에 정한 것", "내 node", "예전에 정리한 것"을 언급하거나 장기 지식이 필요한 질문을 하면 먼저 ltm-vault MCP의 `retrieve_knowledge`를 호출한다.
 - 답변에 vault 내용을 사용한 경우, 그 정보가 vault에서 온 것임을 짧게 밝힌다.
 - vault에서 관련 정보를 찾지 못하면 추측하지 말고 "vault에서는 관련 기억을 찾지 못했다"고 말한다.
 - 사용자가 기억을 저장하라고 명시하면 `list_nodes`로 기존 제목을 확인한 뒤 `create_node`, `update_node`, `upsert_edge` 중 맞는 도구를 사용한다.
@@ -109,15 +109,15 @@ Antigravity가 언제 vault를 조회해야 하는지 알려주려면 `~/.gemini
 
 ## 개인 private vault로 쓰는 패턴
 
-공개 `llm-vault`를 템플릿처럼 쓰고, 개인 기억은 private repo에서 관리할 수 있습니다.
+공개 `ltm-vault`를 템플릿처럼 쓰고, 개인 기억은 private repo에서 관리할 수 있습니다.
 
 ```powershell
-git clone https://github.com/lpaiu-cs/llm-vault.git llm-vault-private
-cd llm-vault-private
+git clone https://github.com/lpaiu-cs/ltm-vault.git ltm-vault-private
+cd ltm-vault-private
 
 git remote rename origin upstream
 git remote set-url --push upstream DISABLED
-git remote add origin https://github.com/<your-name>/llm-vault-private.git
+git remote add origin https://github.com/<your-name>/ltm-vault-private.git
 git push -u origin main
 ```
 

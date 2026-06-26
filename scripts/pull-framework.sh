@@ -15,7 +15,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 if ! git remote | grep -qx upstream; then
   echo "[pull-framework] 'upstream' 리모트가 없습니다. 먼저 등록하세요:" >&2
-  echo "  git remote add upstream https://github.com/lpaiu-cs/llm-vault" >&2
+  echo "  git remote add upstream https://github.com/lpaiu-cs/ltm-vault" >&2
   exit 1
 fi
 

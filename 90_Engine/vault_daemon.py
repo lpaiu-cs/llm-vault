@@ -239,7 +239,7 @@ def _periodic_sync():
 from fastapi import FastAPI, HTTPException          # noqa: E402
 from pydantic import BaseModel                       # noqa: E402
 
-app = FastAPI(title="llm-vault daemon")
+app = FastAPI(title="ltm-vault daemon")
 
 
 class RetrieveReq(BaseModel):
@@ -398,7 +398,7 @@ def main():
     threading.Thread(target=_idle_watchdog, args=(server,), daemon=True).start()
     if _SYNC_OK:  # 싱크 불가(non-git/원격없음/off)면 watchdog 자체를 안 띄움
         threading.Thread(target=_sync_watchdog, args=(server,), daemon=True).start()
-    print(f"[daemon] llm-vault daemon up on http://127.0.0.1:{PORT} "
+    print(f"[daemon] ltm-vault daemon up on http://127.0.0.1:{PORT} "
           f"(db={VAULT_DB}, idle_shutdown={IDLE_SHUTDOWN})", file=sys.stderr)
     server.run()
 

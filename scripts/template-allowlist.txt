@@ -3,7 +3,7 @@
 # 공개 템플릿(upstream)에 올라가도 되는 경로만 명시한다(allowlist).
 # sync-template.sh는 변경 파일이 이 목록 중 하나에도 매칭되지 않으면 push를 중단한다.
 #
-# 경계 원칙: public llm-vault = "프레임워크 템플릿"이다.
+# 경계 원칙: public ltm-vault = "프레임워크 템플릿"이다.
 #   = framework(엔진/정책/문서/스크립트) + 빈 vault 스켈레톤 + examples/mini-vault
 # 실제 지식 코퍼스(개념·프로젝트·결정·요약·큐 내용)는 private 인스턴스에만 둔다.
 # 따라서 지식 계층(10/20/30/40/50/60/70/80)은 README/.gitkeep 구조 파일만 허용한다.

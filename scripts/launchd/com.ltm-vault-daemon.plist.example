@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  llm-vault 데몬 상시가동용 macOS LaunchAgent 템플릿.
+  ltm-vault 데몬 상시가동용 macOS LaunchAgent 템플릿.
 
   데몬은 MCP 클라이언트의 첫 요청에 자동 기동되고 상주하므로 보통은 이 등록이 필요 없다.
   단, "재부팅 직후 클라이언트를 한 번도 안 열어도 데몬이 떠서 주기 sync가 돌게" 하려면
@@ -8,19 +8,19 @@
 
   설치(기기마다 1회):
     1) 이 파일을 복사하고 <REPO>/<HOME> 을 이 기기의 절대경로로 치환한다.
-       - <REPO> : private 인스턴스 저장소 루트 (예: /Users/me/llm-vault-private)
+       - <REPO> : private 인스턴스 저장소 루트 (예: /Users/me/ltm-vault-private)
        - <HOME> : 홈 디렉터리 (예: /Users/me)
        - PATH 의 /opt/homebrew/bin 은 Apple Silicon 기준. Intel 맥은 /usr/local/bin.
        - SYNC_ENABLED=1 은 데몬이 git 동기화까지 맡게 한다(원치 않으면 그 키를 지운다).
     2) ~/Library/LaunchAgents/ 에 저장:
-         cp scripts/launchd/com.llm-vault-daemon.plist.example \
-            ~/Library/LaunchAgents/com.example.llm-vault-daemon.plist
+         cp scripts/launchd/com.ltm-vault-daemon.plist.example \
+            ~/Library/LaunchAgents/com.example.ltm-vault-daemon.plist
          # 편집기로 열어 <REPO>/<HOME> 치환
     3) 로드:
-         launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.llm-vault-daemon.plist
-         launchctl list | grep llm-vault-daemon       # 등록 확인
-    4) 로그: tail -f <HOME>/Library/Logs/llm-vault-daemon.log
-    제거: launchctl bootout gui/$(id -u)/com.example.llm-vault-daemon
+         launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.ltm-vault-daemon.plist
+         launchctl list | grep ltm-vault-daemon       # 등록 확인
+    4) 로그: tail -f <HOME>/Library/Logs/ltm-vault-daemon.log
+    제거: launchctl bootout gui/$(id -u)/com.example.ltm-vault-daemon
 
   주의: 한 기기에 데몬은 하나(싱글턴, 포트 자동 합의). 먼저 뜬 데몬을 나머지가 공유한다.
         git sync는 '데몬을 실제로 기동한 쪽'의 env(SYNC_ENABLED)로 결정되므로, 클라이언트가
@@ -30,7 +30,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.example.llm-vault-daemon</string>
+    <string>com.example.ltm-vault-daemon</string>
 
     <key>ProgramArguments</key>
     <array>
@@ -61,8 +61,8 @@
     <string>Background</string>
 
     <key>StandardOutPath</key>
-    <string><HOME>/Library/Logs/llm-vault-daemon.log</string>
+    <string><HOME>/Library/Logs/ltm-vault-daemon.log</string>
     <key>StandardErrorPath</key>
-    <string><HOME>/Library/Logs/llm-vault-daemon.log</string>
+    <string><HOME>/Library/Logs/ltm-vault-daemon.log</string>
 </dict>
 </plist>

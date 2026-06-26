@@ -1,10 +1,10 @@
-# Why llm-vault?
+# Why ltm-vault?
 
 LLM agents need long-term memory, but naive memory systems turn mistakes into
 permanent state. A note that was guessed, outdated, contradicted, or never
 reviewed can later be retrieved as if it were verified truth.
 
-`llm-vault` is built around a stricter premise: agent memory must preserve
+`ltm-vault` is built around a stricter premise: agent memory must preserve
 evidence, uncertainty, and review state.
 
 ## The Problem
@@ -58,7 +58,7 @@ decisions into the framework skeleton.
 
 ## Why Not Just RAG?
 
-RAG usually answers "what text is similar to this question?" `llm-vault` also
+RAG usually answers "what text is similar to this question?" `ltm-vault` also
 asks "what kind of text is this, how trustworthy is it, and how should an agent
 act on it?"
 
@@ -80,7 +80,7 @@ respecting the vault's source, review, and ontology rules.
 
 ## Minimal Success Criteria
 
-A good `llm-vault` instance should make these behaviors easy to verify:
+A good `ltm-vault` instance should make these behaviors easy to verify:
 
 - a raw source can be ingested without becoming a graph node;
 - a source summary can cite that raw source;

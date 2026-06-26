@@ -24,7 +24,7 @@ related:
 ---
 
 > [!IMPORTANT] 문서 정체성
-> 본 노트는 `llm-vault`를 **LLM-native second brain**으로 운영하기 위한 최상위
+> 본 노트는 `ltm-vault`를 **LLM-native second brain**으로 운영하기 위한 최상위
 > 멘탈 모델입니다. 각 계층(layer)의 역할과 데이터 흐름을 정의하며, 세부 규칙은
 > [[Source Policy]] · [[Ingest Policy]] · [[Review Policy]] · [[Naming Convention]]에
 > 위임합니다.
@@ -124,5 +124,5 @@ related:
 
 ## Sources
 
-- 본 운영 모델은 `llm-vault` 내부 설계 결정에서 도출됨: [[2026-06-18-second-brain-architecture]]
+- 본 운영 모델은 `ltm-vault` 내부 설계 결정에서 도출됨: [[2026-06-18-second-brain-architecture]]
 - 관련 개념: [[Hallucination as Default]], [[LLM OS]]
